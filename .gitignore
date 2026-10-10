@@ -1,0 +1,32 @@
+# Entornos virtuales de Python
+
+venv/
+.venv/
+env/
+
+# Archivos de Python
+
+**pycache**/
+*.py[cod]
+
+# Archivos de Django
+
+db.sqlite3
+staticfiles/
+media/
+
+# Variables de entorno y credenciales
+
+.env
+.env.*
+
+# Configuración de editores
+
+.vscode/
+.idea/
+
+# Archivos temporales
+
+*.log
+.DS_Store
+Thumbs.db
