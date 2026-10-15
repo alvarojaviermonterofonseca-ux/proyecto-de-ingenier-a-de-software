@@ -41,6 +41,31 @@ class GymApiTests(APITestCase):
         self.assertTrue(usuario.contrasena_hash.startswith("argon2"))
         self.assertTrue(Cliente.objects.filter(pk=usuario.pk).exists())
 
+    def test_login_valido_devuelve_usuario_sin_exponer_contrasena(self):
+        self.crear_cliente()
+
+        respuesta = self.client.post(
+            "/api/login/",
+            {"correo": "ANA@example.com", "contrasena": "UnaClaveSegura123"},
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.data["usuario"]["correo"], "ana@example.com")
+        self.assertNotIn("contrasena", respuesta.data["usuario"])
+        self.assertNotIn("contrasena_hash", respuesta.data["usuario"])
+
+    def test_login_invalido_devuelve_error(self):
+        self.crear_cliente()
+
+        respuesta = self.client.post(
+            "/api/login/",
+            {"correo": "ana@example.com", "contrasena": "incorrecta"},
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 401)
+
     def test_fechas_invalidas_devuelven_error_json(self):
         respuesta = self.crear_cliente()
         respuesta = self.client.post(

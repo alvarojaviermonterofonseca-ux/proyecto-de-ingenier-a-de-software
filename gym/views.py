@@ -1,9 +1,11 @@
 """ViewSets CRUD para todos los recursos de Gym Control Pro."""
 
 from django.db.models.deletion import ProtectedError
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import (
     Administrador,
@@ -33,6 +35,7 @@ from .serializers import (
     EjercicioSerializer,
     EntrenadorSerializer,
     EntrenamientoSerializer,
+    LoginSerializer,
     NotificacionSerializer,
     PlanAlimentacionSerializer,
     PlanEntrenamientoEjercicioSerializer,
@@ -43,6 +46,22 @@ from .serializers import (
     TerapeutaSerializer,
     UsuarioSerializer,
 )
+
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.validated_data["usuario"]
+        return Response(
+            {
+                "mensaje": "Inicio de sesión exitoso.",
+                "usuario": UsuarioSerializer(usuario, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ViewSetBase(viewsets.ModelViewSet):

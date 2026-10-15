@@ -16,6 +16,19 @@ python manage.py runserver
 
 La API queda disponible en `http://127.0.0.1:8000/api/` y responde únicamente JSON. La migración crea los cinco roles del esquema (`cliente`, `entrenador`, `terapeuta`, `recepcionista` y `administrador`).
 
+## Inicio de sesión
+
+Envía el correo y la contraseña a `POST /api/login/`. Si las credenciales son válidas y la cuenta y su rol están activos, la respuesta incluye los datos públicos del usuario y su perfil asociado. Las contraseñas y sus hashes nunca se devuelven.
+
+```json
+{
+  "correo": "ana@example.com",
+  "contrasena": "UnaClaveSegura123"
+}
+```
+
+Este endpoint solo valida las credenciales; no genera una sesión ni un token. Los demás endpoints de la API permanecen abiertos, como está configurado actualmente.
+
 ## Endpoints
 
 Todos los recursos ofrecen `GET` de lista/detalle, `POST`, `PUT`, `PATCH` y `DELETE`. Los `DELETE` de los recursos históricos son lógicos, por lo que el dato queda preservado y deja de aparecer en las consultas normales.

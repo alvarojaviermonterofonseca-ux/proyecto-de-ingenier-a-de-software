@@ -1,5 +1,6 @@
 """Rutas REST de la aplicación Gym Control Pro."""
 
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -11,6 +12,7 @@ from .views import (
     EjercicioViewSet,
     EntrenadorViewSet,
     EntrenamientoViewSet,
+    LoginView,
     NotificacionViewSet,
     PlanAlimentacionViewSet,
     PlanEntrenamientoEjercicioViewSet,
@@ -43,4 +45,7 @@ router.register("comidas", ComidaViewSet, basename="comida")
 router.register("registros-comida", RegistroComidaViewSet, basename="registro-comida")
 router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("login/", LoginView.as_view(), name="login"),
+    *router.urls,
+]

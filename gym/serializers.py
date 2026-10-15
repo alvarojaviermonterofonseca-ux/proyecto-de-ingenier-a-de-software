@@ -8,7 +8,8 @@ from copy import copy
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from rest_framework import serializers
+from rest_framework import serializers, status
+from rest_framework.exceptions import APIException
 
 from .models import (
     Administrador,
@@ -29,6 +30,12 @@ from .models import (
     Terapeuta,
     Usuario,
 )
+
+
+class LoginFailed(APIException):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    default_detail = "Correo o contraseña incorrectos."
+    default_code = "authentication_failed"
 
 
 class ModeloValidadoSerializer(serializers.ModelSerializer):
@@ -302,6 +309,27 @@ class UsuarioSerializer(ModeloValidadoSerializer):
         except (Cliente.DoesNotExist, Entrenador.DoesNotExist, Terapeuta.DoesNotExist, Recepcionista.DoesNotExist, Administrador.DoesNotExist):
             return None
         return serializer_clase(perfil, context=self.context).data
+
+
+class LoginSerializer(serializers.Serializer):
+    correo = serializers.EmailField()
+    contrasena = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate(self, attrs):
+        usuario = (
+            Usuario.objects.select_related("rol")
+            .filter(
+                correo__iexact=attrs["correo"],
+                is_active=True,
+                deleted_at__isnull=True,
+                rol__is_active=True,
+            )
+            .first()
+        )
+        if usuario is None or not usuario.check_password(attrs["contrasena"]):
+            raise LoginFailed()
+        attrs["usuario"] = usuario
+        return attrs
 
 
 class ClienteEntrenadorSerializer(ModeloValidadoSerializer):
