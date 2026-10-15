@@ -4,6 +4,11 @@ El diseño corresponde al esquema ``gym_control_pro.sql``.  Se conserva el
 borrado lógico de las entidades operativas para mantener el historial.
 """
 
+import hashlib
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -81,8 +86,49 @@ class Usuario(ModeloAuditable):
 
         return check_password(raw_password, self.contrasena_hash)
 
+    @property
+    def is_authenticated(self):
+        """Compatibilidad con ``IsAuthenticated`` de Django REST Framework."""
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
     def __str__(self):
         return f"{self.nombre} ({self.correo})"
+
+
+class Sesion(models.Model):
+    """Sesión revocable para la autenticación Bearer de ``Usuario``.
+
+    Solo se persiste el hash SHA-256 del secreto: si la base de datos se
+    filtrara, no se puede usar directamente para entrar a la API.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name="sesiones", db_column="usuario_id")
+    token_hash = models.CharField(max_length=64, unique=True)
+    creada_at = models.DateTimeField(auto_now_add=True)
+    expira_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sesiones"
+        indexes = [models.Index(fields=["usuario", "expira_at"], name="idx_sesion_usuario_expira")]
+
+    @staticmethod
+    def hash_token(token):
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def crear_para_usuario(cls, usuario):
+        token = secrets.token_urlsafe(32)
+        sesion = cls.objects.create(
+            usuario=usuario,
+            token_hash=cls.hash_token(token),
+            expira_at=timezone.now() + timedelta(hours=settings.AUTH_TOKEN_TTL_HOURS),
+        )
+        return token, sesion
 
 
 class PerfilBase(ModeloAuditable):

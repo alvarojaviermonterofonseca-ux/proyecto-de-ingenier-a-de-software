@@ -1,6 +1,7 @@
 """Rutas REST de la aplicación Gym Control Pro."""
 
 from django.urls import path
+from rest_framework.permissions import AllowAny
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -13,6 +14,7 @@ from .views import (
     EntrenadorViewSet,
     EntrenamientoViewSet,
     LoginView,
+    LogoutView,
     NotificacionViewSet,
     PlanAlimentacionViewSet,
     PlanEntrenamientoEjercicioViewSet,
@@ -22,11 +24,24 @@ from .views import (
     RolViewSet,
     TerapeutaViewSet,
     UsuarioViewSet,
+    PerfilActualView,
 )
 
 app_name = "gym"
 
-router = DefaultRouter()
+
+class PublicApiRootView(DefaultRouter.APIRootView):
+    """Muestra el índice de la API sin exponer los recursos."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+
+class GymRouter(DefaultRouter):
+    APIRootView = PublicApiRootView
+
+
+router = GymRouter()
 router.register("roles", RolViewSet, basename="rol")
 router.register("usuarios", UsuarioViewSet, basename="usuario")
 router.register("clientes", ClienteViewSet, basename="cliente")
@@ -47,5 +62,7 @@ router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
+    path("logout/", LogoutView.as_view(), name="logout"),
+    path("me/", PerfilActualView.as_view(), name="perfil-actual"),
     *router.urls,
 ]

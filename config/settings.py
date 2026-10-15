@@ -63,7 +63,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'frontend'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -99,7 +99,7 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": os.getenv("DB_NAME", str(BASE_DIR / "db.sqlite3")),
         }
     }
 
@@ -146,6 +146,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [BASE_DIR / 'frontend' / 'static']
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -156,6 +157,17 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG and not _cors_origins
 CORS_ALLOWED_ORIGINS = _cors_origins
 
 REST_FRAMEWORK = {
+    # La API usa tokens Bearer propios porque ``Usuario`` no hereda del modelo
+    # User de Django.  La autenticación se aplica a todas las vistas salvo las
+    # que la declaran expresamente pública (inicio de sesión).
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "config.authentication.UsuarioTokenAuthentication",
+        # Reutiliza la sesión de /admin/ solamente para personal administrador.
+        "config.authentication.AdminSessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.BrowsableAPIRenderer",
         "rest_framework.renderers.JSONRenderer",
@@ -165,6 +177,10 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 25,
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
 }
+
+# Duración de cada sesión emitida al iniciar sesión.  Puede ajustarse sin
+# cambiar código, por ejemplo: $env:AUTH_TOKEN_TTL_HOURS = "12".
+AUTH_TOKEN_TTL_HOURS = int(os.getenv("AUTH_TOKEN_TTL_HOURS", "8"))
 
 
 # Email

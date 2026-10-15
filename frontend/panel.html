@@ -1,0 +1,76 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Gym Control Pro | Panel</title>
+  <link rel="stylesheet" href="{% static 'panel.css' %}">
+  <script src="{% static 'panel.js' %}" defer></script>
+</head>
+<body>
+  <main class="page">
+    <section id="login-view" class="card login-card" aria-labelledby="login-title">
+      <p class="eyebrow">GYM CONTROL PRO</p>
+      <h1 id="login-title">Iniciar sesión</h1>
+      <p class="muted">Ingresa con tu cuenta para consultar los datos del gimnasio.</p>
+      <form id="login-form">
+        <label for="correo">Correo</label>
+        <input id="correo" name="correo" type="email" autocomplete="username" required>
+        <label for="contrasena">Contraseña</label>
+        <input id="contrasena" name="contrasena" type="password" autocomplete="current-password" required>
+        <button id="login-button" class="primary-button" type="submit">Entrar</button>
+        <p id="login-message" class="message" role="alert" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section id="app-view" class="app-view" hidden>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">GYM CONTROL PRO</p>
+          <h1>Panel de datos</h1>
+          <p id="user-label" class="muted"></p>
+        </div>
+        <button id="logout-button" class="secondary-button" type="button">Cerrar sesión</button>
+      </header>
+
+      <section class="card data-card" aria-labelledby="resource-heading">
+        <div class="toolbar">
+          <label for="resource-select">Tabla</label>
+          <select id="resource-select">
+            <option value="roles">Roles</option>
+            <option value="usuarios">Usuarios</option>
+            <option value="clientes">Clientes</option>
+            <option value="entrenadores" selected>Entrenadores</option>
+            <option value="terapeutas">Terapeutas</option>
+            <option value="recepcionistas">Recepcionistas</option>
+            <option value="administradores">Administradores</option>
+            <option value="asignaciones-cliente-entrenador">Asignaciones cliente-entrenador</option>
+            <option value="asistencias">Asistencias</option>
+            <option value="entrenamientos">Entrenamientos</option>
+            <option value="ejercicios">Ejercicios</option>
+            <option value="planes-entrenamiento">Planes de entrenamiento</option>
+            <option value="planes-entrenamiento-ejercicios">Ejercicios de planes</option>
+            <option value="planes-alimentacion">Planes de alimentación</option>
+            <option value="comidas">Comidas</option>
+            <option value="registros-comida">Registros de comida</option>
+            <option value="notificaciones">Notificaciones</option>
+          </select>
+          <button id="refresh-button" class="secondary-button" type="button">Actualizar</button>
+        </div>
+
+        <div class="results-heading">
+          <h2 id="resource-heading">Entrenadores</h2>
+          <p id="resource-message" class="muted" role="status" aria-live="polite"></p>
+        </div>
+        <pre id="resource-data" class="data-output" aria-label="Datos de la tabla"></pre>
+        <nav class="pager" aria-label="Paginación">
+          <button id="previous-button" class="secondary-button" type="button" disabled>Anterior</button>
+          <button id="next-button" class="secondary-button" type="button" disabled>Siguiente</button>
+        </nav>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

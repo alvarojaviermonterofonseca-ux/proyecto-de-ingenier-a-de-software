@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
-from django.views.generic import RedirectView
+from django.views.generic import RedirectView, TemplateView
 
 
 def resource_aliases(*pairs):
@@ -34,6 +34,7 @@ def resource_aliases(*pairs):
 
 
 urlpatterns = [
+    path('panel/', TemplateView.as_view(template_name='panel.html'), name='frontend-panel'),
     path('', RedirectView.as_view(pattern_name='gym:api-root', permanent=False), name='root'),
     path('admin/', admin.site.urls),
     path('api/admin/', RedirectView.as_view(url='/admin/', permanent=False)),

@@ -12,6 +12,7 @@ env/
 # Archivos de Django
 
 db.sqlite3
+gym_control_pro_100.sqlite3
 staticfiles/
 media/
 

@@ -1,9 +1,10 @@
 """ViewSets CRUD para todos los recursos de Gym Control Pro."""
 
+from django.contrib.auth import logout as django_logout
 from django.db.models.deletion import ProtectedError
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,6 +24,7 @@ from .models import (
     Recepcionista,
     RegistroComida,
     Rol,
+    Sesion,
     Terapeuta,
     Usuario,
 )
@@ -49,30 +51,67 @@ from .serializers import (
 
 
 class LoginView(APIView):
+    # Permite volver a autenticarse incluso si el cliente aún conserva un
+    # token vencido o revocado en sus encabezados.
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         usuario = serializer.validated_data["usuario"]
+        token, sesion = Sesion.crear_para_usuario(usuario)
         return Response(
             {
                 "mensaje": "Inicio de sesión exitoso.",
+                "token": token,
+                "tipo_token": "Bearer",
+                "expira_at": sesion.expira_at,
                 "usuario": UsuarioSerializer(usuario, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,
         )
 
 
+class LogoutView(APIView):
+    """Revoca únicamente la sesión que acompaña la solicitud actual."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if isinstance(request.auth, Sesion):
+            request.auth.delete()
+        else:
+            django_logout(request)
+        # Se devuelve contenido para que la respuesta sea consistente tanto
+        # para JSON como para el navegador de DRF durante el desarrollo.
+        return Response({"mensaje": "Sesión cerrada correctamente."}, status=status.HTTP_200_OK)
+
+
+class PerfilActualView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if isinstance(request.user, Usuario):
+            return Response(UsuarioSerializer(request.user, context={"request": request}).data)
+        return Response(
+            {
+                "id": request.user.pk,
+                "username": request.user.get_username(),
+                "correo": request.user.email,
+                "es_administrador": request.user.is_staff,
+            }
+        )
+
+
 class ViewSetBase(viewsets.ModelViewSet):
     """Respuestas JSON CRUD y borrado lógico cuando el modelo lo admite.
 
-    La API queda sin autenticación para facilitar la conexión inicial del
-    frontend. Antes de exponerla a Internet, sustituya ``AllowAny`` por una
-    política de autenticación/autorización acorde con los roles de negocio.
+    Todos los recursos requieren una sesión Bearer vigente. Las restricciones
+    específicas por rol pueden añadirse sobre esta base en cada ViewSet.
     """
 
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
