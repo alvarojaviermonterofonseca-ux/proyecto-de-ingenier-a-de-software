@@ -1,5 +1,6 @@
 from datetime import date
 from io import BytesIO
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -10,9 +11,12 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
+from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
 from PIL import Image
 from rest_framework.test import APITestCase
+
+from config.env import cargar_env
 
 from .models import (
     Administrador,
@@ -1710,3 +1714,54 @@ class GymApiTests(APITestCase):
         self.assertIsNotNone(evento)
         self.assertEqual(evento.actor, self.operador)
         self.assertEqual(evento.detalles["permisos"], [codigo])
+
+
+class CargarEnvTests(SimpleTestCase):
+    """Comportamiento del cargador de backend/.env."""
+
+    def _cargar(self, contenido, entorno=None):
+        with TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / ".env"
+            ruta.write_text(contenido, encoding="utf-8")
+            with patch.dict(os.environ, entorno or {}, clear=True):
+                cargar_env(ruta)
+                return dict(os.environ)
+
+    def test_carga_claves_y_omite_lineas_invalidas(self):
+        resultado = self._cargar(
+            "\n".join(
+                [
+                    "# comentario",
+                    'CLAVE=valor',
+                    "",
+                    "OTRA= con espacios ",
+                    "export EXPORTADA=x",
+                    'COMILLAS="doble"',
+                    "linea sin igual",
+                    "=sin-clave",
+                    "1INVALIDA=x",
+                ]
+            )
+        )
+
+        self.assertEqual(resultado["CLAVE"], "valor")
+        self.assertEqual(resultado["OTRA"], "con espacios")
+        self.assertEqual(resultado["EXPORTADA"], "x")
+        self.assertEqual(resultado["COMILLAS"], "doble")
+        self.assertNotIn("linea sin igual", resultado)
+        self.assertNotIn("", resultado)
+        self.assertNotIn("1INVALIDA", resultado)
+
+    def test_no_sobrescribe_variables_del_proceso(self):
+        resultado = self._cargar("CLAVE=del-archivo\nNUEVA=del-archivo", {"CLAVE": "del-proceso"})
+
+        self.assertEqual(resultado["CLAVE"], "del-proceso")
+        self.assertEqual(resultado["NUEVA"], "del-archivo")
+
+    def test_archivo_ausente_no_falla_ni_modifica_el_entorno(self):
+        with TemporaryDirectory() as carpeta:
+            faltante = Path(carpeta) / ".env"
+            with patch.dict(os.environ, {"CLAVE": "del-proceso"}, clear=True):
+                cargar_env(faltante)
+
+                self.assertEqual(dict(os.environ), {"CLAVE": "del-proceso"})

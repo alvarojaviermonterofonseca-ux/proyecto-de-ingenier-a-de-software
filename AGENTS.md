@@ -6,6 +6,7 @@
 - The current UI is an Angular 19 standalone SPA in `frontend/src/app/`, served by Django at `/app/` from `frontend/dist/gym-control-rbac/browser/`. `backend/config/frontend.py` serves hashed assets and falls back to `index.html` for SPA routes. Build it before using `/app/`.
 - The legacy Django-served panel at `/panel/` (`frontend/panel.html`, `frontend/static/panel.js`, `frontend/static/rbac.js`) remains intact and is not the new SPA.
 - Default DB is `base de datos/db.sqlite3`, not the ignored root `db.sqlite3`. Override with `DB_NAME`; use `DB_ENGINE=mysql` plus `DB_*` for MySQL.
+- Settings load `backend/.env` (template: `backend/.env.example`) through `config/env.py`. Real process env always wins, and `.env` stays untracked.
 - Read root `README.md` for API routes, RBAC policy, roles, demo seeding, and env vars.
 
 ## Commands
@@ -31,7 +32,7 @@ npm run build      # production build served by Django at /app/
 Verification:
 
 ```powershell
-python backend\manage.py test gym          # 52 tests, ~29s
+python backend\manage.py test gym          # 55 tests, ~30s
 python backend\manage.py test gym.tests.GymApiTests.test_roles_iniciales_y_rutas_crud_requieren_autenticacion
 python backend\manage.py check
 python backend\manage.py makemigrations --check --dry-run

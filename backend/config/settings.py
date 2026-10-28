@@ -17,6 +17,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
 
+# Carga backend/.env (si existe) antes de leer cualquier variable. La terminal
+# siempre tiene prioridad; ver backend/.env.example para las claves admitidas.
+from config.env import cargar_env  # noqa: E402
+
+cargar_env(BASE_DIR / ".env")
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/

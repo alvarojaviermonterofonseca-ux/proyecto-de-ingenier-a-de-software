@@ -186,6 +186,14 @@ Al crear un usuario se debe incluir la contraseña temporalmente en `contrasena`
 
 ## Base de datos y configuración
 
+La configuración local puede vivir en `backend/.env`; copia la plantilla `backend/.env.example` y ajusta lo que necesites:
+
+```powershell
+Copy-Item backend\.env.example backend\.env
+```
+
+El archivo `backend/.env` está excluido de Git y solo se lee si existe. Las variables exportadas en la terminal tienen prioridad sobre él, así que no hace falta duplicarlas.
+
 Por defecto se usa SQLite, para que el proyecto pueda ejecutarse de inmediato. Para usar MySQL 8 y mantener el motor del archivo SQL, cree la base de datos y defina estas variables antes de migrar:
 
 ```powershell
@@ -197,6 +205,6 @@ $env:DB_HOST = "127.0.0.1"
 python backend\manage.py migrate
 ```
 
-Otras variables útiles: `API_PAGE_SIZE` (tamaño de página, por defecto `25`), `LOGIN_THROTTLE_RATE` (por defecto `10/min`), `AUTH_TOKEN_TTL_HOURS` y `PRIVATE_MEDIA_ROOT`.
+Otras variables útiles: `API_PAGE_SIZE` (tamaño de página, por defecto `25`), `LOGIN_THROTTLE_RATE` (por defecto `10/min`), `AUTH_TOKEN_TTL_HOURS`, `PRIVATE_MEDIA_ROOT`, `FOTO_REGISTRO_MAX_BYTES` y `FOTO_REGISTRO_MAX_DIMENSION`.
 
 CORS está abierto mientras `DJANGO_DEBUG=true`, pensado para el frontend local. En producción use `DJANGO_DEBUG=false`, una `DJANGO_SECRET_KEY` segura, `DJANGO_ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` (orígenes separados por comas).
