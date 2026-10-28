@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -97,18 +99,25 @@ if os.getenv("DB_ENGINE", "sqlite").lower() == "mysql":
         "default": {
             "ENGINE": "django.db.backends.mysql",
             "NAME": os.getenv("DB_NAME", "gym_control_pro"),
-            "USER": os.getenv("DB_USER", "root"),
+            "USER": os.getenv("DB_USER", ""),
             "PASSWORD": os.getenv("DB_PASSWORD", ""),
-            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-            "PORT": os.getenv("DB_PORT", "3306"),
+            "HOST": os.getenv("DB_HOST", ""),
+            "PORT": os.getenv("DB_PORT", ""),
             "OPTIONS": {"charset": "utf8mb4"},
         }
     }
 else:
+    _ruta_sqlite = os.getenv("DB_NAME")
+    if not _ruta_sqlite:
+        raise ImproperlyConfigured(
+            "DB_NAME no está definido. Copia backend/.env.example a backend/.env y "
+            "define DB_NAME con la ruta del archivo SQLite, por ejemplo "
+            r"C:\Users\Acer\Downloads\gym_control_pro\base de datos\db.sqlite3"
+        )
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": os.getenv("DB_NAME", str(PROJECT_ROOT / "base de datos" / "db.sqlite3")),
+            "NAME": _ruta_sqlite,
         }
     }
 

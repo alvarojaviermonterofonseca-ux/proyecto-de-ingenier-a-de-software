@@ -194,7 +194,7 @@ Copy-Item backend\.env.example backend\.env
 
 El archivo `backend/.env` está excluido de Git y solo se lee si existe. Las variables exportadas en la terminal tienen prioridad sobre él, así que no hace falta duplicarlas.
 
-Por defecto se usa SQLite, para que el proyecto pueda ejecutarse de inmediato. Para usar MySQL 8 y mantener el motor del archivo SQL, cree la base de datos y defina estas variables antes de migrar:
+Por defecto se usa SQLite, para que el proyecto pueda ejecutarse de inmediato. La ruta de la base es obligatoria: define `DB_NAME` en `backend/.env` (o en la terminal) apuntando a `base de datos/db.sqlite3`; si falta, Django se detiene con un mensaje explícito. Para usar MySQL 8 y mantener el motor del archivo SQL, cree la base de datos y defina estas variables antes de migrar:
 
 ```powershell
 $env:DB_ENGINE = "mysql"

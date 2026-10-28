@@ -5,7 +5,7 @@
 - Django 6.1 + DRF API in `backend/`; canonical API is `/api/v1/` (`/api/` remains a compatibility alias). Admin is `/admin/`; schema/docs are `/api/v1/schema/` and `/api/v1/docs/`.
 - The current UI is an Angular 19 standalone SPA in `frontend/src/app/`, served by Django at `/app/` from `frontend/dist/gym-control-rbac/browser/`. `backend/config/frontend.py` serves hashed assets and falls back to `index.html` for SPA routes. Build it before using `/app/`.
 - The legacy Django-served panel at `/panel/` (`frontend/panel.html`, `frontend/static/panel.js`, `frontend/static/rbac.js`) remains intact and is not the new SPA.
-- Default DB is `base de datos/db.sqlite3`, not the ignored root `db.sqlite3`. Override with `DB_NAME`; use `DB_ENGINE=mysql` plus `DB_*` for MySQL.
+- Default DB is `base de datos/db.sqlite3`, but `DB_NAME` is now **required**: there is no implicit fallback and settings raise `ImproperlyConfigured` if it is missing. Use `DB_ENGINE=mysql` plus `DB_*` for MySQL.
 - Settings load `backend/.env` (template: `backend/.env.example`) through `config/env.py`. Real process env always wins, and `.env` stays untracked.
 - Read root `README.md` for API routes, RBAC policy, roles, demo seeding, and env vars.
 
