@@ -1,0 +1,182 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Nutrición"
+    title="Planes de alimentación"
+    subtitle="Planes nutricionales por cliente y su profesional responsable."
+  >
+    @if (auth.hasPermission('planes-alimentacion:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nuevo plan
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar plan, cliente u objetivo"
+          [value]="search()"
+          (input)="updateSearch($any($event.target).value)"
+        />
+      </div>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando planes...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="salad"
+        title="Sin planes de alimentación"
+        message="Crea un plan para organizar las comidas y el objetivo nutricional."
+      />
+    } @else {
+      <div class="plan-grid">
+        @for (plan of filtered(); track plan.id) {
+          <article class="plan-card">
+            <header>
+              <div class="plan-card__client">
+                <app-avatar [name]="plan.cliente_detalle.nombre" [size]="38" />
+                <div>
+                  <strong>{{ plan.nombre }}</strong>
+                  <span>{{ plan.cliente_detalle.nombre }}</span>
+                </div>
+              </div>
+              <app-status-badge
+                [label]="plan.activo ? 'Activo' : 'Inactivo'"
+                [tone]="plan.activo ? 'success' : 'neutral'"
+              />
+            </header>
+            <p class="plan-card__objective">{{ plan.objetivo }}</p>
+            <div class="calories">
+              <app-icon name="target" [size]="18" />
+              <div>
+                <strong>{{ plan.calorias_objetivo ? plan.calorias_objetivo + ' kcal' : 'Sin meta calórica' }}</strong>
+                <span>Objetivo diario</span>
+              </div>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>Responsable</dt>
+                <dd>{{ plan.responsable_detalle.nombre }}</dd>
+              </div>
+              <div>
+                <dt>Vigencia</dt>
+                <dd>{{ formatDate(plan.fecha_inicio) }} — {{ plan.fecha_fin ? formatDate(plan.fecha_fin) : 'Abierta' }}</dd>
+              </div>
+            </dl>
+            <footer>
+              @if (auth.hasPermission('comidas:view')) {
+                <a class="button button--secondary button--sm" routerLink="/comidas" [queryParams]="{ plan: plan.id }">
+                  <app-icon name="apple" [size]="15" />
+                  Ver comidas
+                </a>
+              }
+              <div class="row-actions">
+                @if (auth.hasPermission('planes-alimentacion:edit')) {
+                  <button class="icon-button" type="button" (click)="openEdit(plan)" aria-label="Editar plan">
+                    <app-icon name="edit" [size]="16" />
+                  </button>
+                }
+                @if (auth.hasPermission('planes-alimentacion:delete')) {
+                  <button class="icon-button" type="button" (click)="remove(plan)" aria-label="Eliminar plan">
+                    <app-icon name="trash" [size]="16" />
+                  </button>
+                }
+              </div>
+            </footer>
+          </article>
+        }
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar plan de alimentación' : 'Nuevo plan de alimentación'"
+  subtitle="El responsable debe ser un entrenador activo."
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field">
+        <label for="nutrition-cliente">Cliente</label>
+        <select id="nutrition-cliente" formControlName="cliente">
+          <option [value]="0" disabled>Selecciona un cliente</option>
+          @for (client of clients(); track client.usuario) {
+            <option [value]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="nutrition-responsable">Responsable</label>
+        <select id="nutrition-responsable" formControlName="responsable">
+          <option [value]="0" disabled>Selecciona un entrenador</option>
+          @for (trainer of trainers(); track trainer.usuario) {
+            <option [value]="trainer.usuario">{{ trainer.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field field--full">
+        <label for="nutrition-nombre">Nombre del plan</label>
+        <input id="nutrition-nombre" formControlName="nombre" placeholder="Ej. Recomposición corporal" />
+      </div>
+      <div class="field field--full">
+        <label for="nutrition-objetivo">Objetivo</label>
+        <input id="nutrition-objetivo" formControlName="objetivo" />
+      </div>
+      <div class="field">
+        <label for="nutrition-calorias">Calorías objetivo</label>
+        <input id="nutrition-calorias" type="number" step="1" formControlName="calorias_objetivo" />
+      </div>
+      <div class="field">
+        <label for="nutrition-inicio">Fecha de inicio</label>
+        <input id="nutrition-inicio" type="date" formControlName="fecha_inicio" />
+      </div>
+      <div class="field">
+        <label for="nutrition-fin">Fecha de fin</label>
+        <input id="nutrition-fin" type="date" formControlName="fecha_fin" />
+      </div>
+      <div class="field field--full">
+        <label for="nutrition-observaciones">Observaciones</label>
+        <textarea id="nutrition-observaciones" formControlName="observaciones" rows="3"></textarea>
+      </div>
+      <label class="check-field">
+        <input type="checkbox" formControlName="activo" />
+        <span>Plan activo</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear plan' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

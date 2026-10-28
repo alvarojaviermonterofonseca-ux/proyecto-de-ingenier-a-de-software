@@ -1,0 +1,216 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Personas"
+    title="Asignaciones"
+    subtitle="Define qué profesionales acompañan a cada cliente."
+  >
+    @if (activeConfig(); as config) {
+      @if (auth.hasPermission(config.createPermission)) {
+        <button class="button button--primary" type="button" (click)="openCreate()">
+          <app-icon name="plus" [size]="17" />
+          Nueva asignación
+        </button>
+      }
+    }
+  </app-page-header>
+
+  <div class="tabs" role="tablist" aria-label="Tipo de asignación">
+    @for (config of configs(); track config.kind) {
+      <button
+        class="tab"
+        type="button"
+        role="tab"
+        [class.active]="activeKind() === config.kind"
+        [attr.aria-selected]="activeKind() === config.kind"
+        (click)="selectKind(config.kind)"
+      >
+        <app-icon [name]="config.icon" [size]="16" />
+        {{ config.label }}
+      </button>
+    }
+  </div>
+
+  @if (configs().length === 0) {
+    <section class="card">
+      <app-empty-state
+        icon="target"
+        title="Sin acceso a asignaciones"
+        message="Tu rol no tiene permisos para consultar asignaciones."
+      />
+    </section>
+  } @else {
+    @if (activeConfig(); as config) {
+    <section class="card">
+      <header class="list-head">
+        <div>
+          <h2>{{ config.label }}</h2>
+          <p>{{ config.description }}</p>
+        </div>
+        <div class="list-head__tools">
+          <div class="search-box">
+            <app-icon name="search" [size]="16" />
+            <input
+              type="search"
+              placeholder="Buscar cliente o profesional"
+              [value]="search()"
+              (input)="updateSearch($any($event.target).value)"
+            />
+          </div>
+          <select
+            aria-label="Filtrar por estado"
+            [value]="activeFilter()"
+            (change)="updateActiveFilter($any($event.target).value)"
+          >
+            <option value="">Todas</option>
+            <option value="true">Activas</option>
+            <option value="false">Inactivas</option>
+          </select>
+          <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+            <app-icon name="refresh" [size]="17" />
+          </button>
+        </div>
+      </header>
+
+      @if (error()) {
+        <div class="notice notice--error" role="alert">
+          <app-icon name="alert" [size]="18" />
+          <span>{{ error() }}</span>
+          <button class="link-button" type="button" (click)="load()">Reintentar</button>
+        </div>
+      }
+
+      @if (loading()) {
+        <div class="loading-state"><span class="spinner"></span><span>Cargando asignaciones...</span></div>
+      } @else if (filtered().length === 0) {
+        <app-empty-state
+          icon="target"
+          title="Sin asignaciones"
+          message="Crea una asignación para vincular clientes y profesionales."
+        >
+          @if (auth.hasPermission(config.createPermission)) {
+            <button class="button button--primary button--sm" type="button" (click)="openCreate()">
+              Crear asignación
+            </button>
+          }
+        </app-empty-state>
+      } @else {
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>{{ config.professionalLabel }}</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (assignment of filtered(); track assignment.id) {
+                <tr>
+                  <td>
+                    <div class="cell-title">
+                      <app-avatar [name]="assignment.cliente_detalle.nombre" [size]="34" />
+                      <div>
+                        <strong>{{ assignment.cliente_detalle.nombre }}</strong>
+                        <span>{{ assignment.cliente_detalle.correo }}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <strong class="professional">{{ professionalName(assignment) }}</strong>
+                  </td>
+                  <td>{{ formatDate(assignment.fecha_inicio) }}</td>
+                  <td>{{ assignment.fecha_fin ? formatDate(assignment.fecha_fin) : 'Sin fin' }}</td>
+                  <td>
+                    <app-status-badge
+                      [label]="assignment.activo ? 'Activa' : 'Finalizada'"
+                      [tone]="assignment.activo ? 'success' : 'neutral'"
+                    />
+                  </td>
+                  <td>
+                    <div class="row-actions">
+                      @if (auth.hasPermission(config.editPermission)) {
+                        <button class="icon-button" type="button" (click)="openEdit(assignment)" aria-label="Editar asignación">
+                          <app-icon name="edit" [size]="16" />
+                        </button>
+                      }
+                      @if (auth.hasPermission(config.deletePermission)) {
+                        <button class="icon-button" type="button" (click)="remove(assignment)" aria-label="Eliminar asignación">
+                          <app-icon name="trash" [size]="16" />
+                        </button>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+    }
+  }
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar asignación' : 'Nueva asignación'"
+  [subtitle]="activeConfig()?.description ?? ''"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="assign-cliente">Cliente</label>
+        <select id="assign-cliente" formControlName="cliente">
+          <option [value]="0" disabled>Selecciona un cliente</option>
+          @for (client of clients(); track client.usuario) {
+            <option [value]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field field--full">
+        <label for="assign-profesional">{{ activeConfig()?.professionalLabel }}</label>
+        <select id="assign-profesional" formControlName="profesional">
+          <option [value]="0" disabled>Selecciona un profesional</option>
+          @for (professional of professionals(); track professional.usuario) {
+            <option [value]="professionalValue(professional)">
+              {{ professional.usuario_detalle.nombre }}
+              {{ professional.especialidad ? '· ' + professional.especialidad : '' }}
+            </option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="assign-inicio">Fecha de inicio</label>
+        <input id="assign-inicio" type="date" formControlName="fecha_inicio" />
+      </div>
+      <div class="field">
+        <label for="assign-fin">Fecha de fin (opcional)</label>
+        <input id="assign-fin" type="date" formControlName="fecha_fin" />
+      </div>
+      <label class="check-field">
+        <input type="checkbox" formControlName="activo" />
+        <span>Asignación activa</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : 'Guardar asignación' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

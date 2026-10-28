@@ -1,0 +1,185 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Comunicación"
+    title="Notificaciones"
+    subtitle="Recordatorios, alertas y mensajes del sistema."
+  >
+    @if (auth.hasPermission('notificaciones:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nueva notificación
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar título, mensaje o destinatario"
+          [value]="search()"
+          (input)="search.set($any($event.target).value)"
+        />
+      </div>
+      <select
+        class="filter-select"
+        [value]="stateFilter()"
+        (change)="updateFilter('state', $any($event.target).value)"
+      >
+        <option value="">Todos los estados</option>
+        @for (state of notificationStates | keyvalue; track state.key) {
+          <option [value]="state.key">{{ state.value }}</option>
+        }
+      </select>
+      <select
+        class="filter-select"
+        [value]="typeFilter()"
+        (change)="updateFilter('type', $any($event.target).value)"
+      >
+        <option value="">Todos los tipos</option>
+        @for (type of notificationTypes | keyvalue; track type.key) {
+          <option [value]="type.key">{{ type.value }}</option>
+        }
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando notificaciones...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="bell"
+        title="Sin notificaciones"
+        message="No hay mensajes que coincidan con los filtros seleccionados."
+      />
+    } @else {
+      <div class="notification-list">
+        @for (notification of filtered(); track notification.id) {
+          <article class="notification-item">
+            <span class="notification-item__icon" [class]="'notification-item__icon notification-item__icon--' + notification.estado">
+              <app-icon name="bell" [size]="17" />
+            </span>
+            <div class="notification-item__body">
+              <header>
+                <div>
+                  <span class="tag">{{ typeLabel(notification.tipo) }}</span>
+                  <strong>{{ notification.titulo }}</strong>
+                </div>
+                <app-status-badge
+                  [label]="stateLabel(notification.estado)"
+                  [tone]="stateTone(notification.estado)"
+                />
+              </header>
+              <p>{{ notification.mensaje }}</p>
+              <footer>
+                <span class="recipient">
+                  <app-avatar [name]="notification.usuario_detalle.nombre" [size]="22" />
+                  {{ notification.usuario_detalle.nombre }}
+                </span>
+                <span>
+                  Programada: {{ notification.programada_at ? formatDateTime(notification.programada_at) : 'Inmediata' }}
+                </span>
+                @if (notification.enviada_at) {
+                  <span>Enviada: {{ formatDateTime(notification.enviada_at) }}</span>
+                }
+              </footer>
+            </div>
+            <div class="row-actions">
+              @if (auth.hasPermission('notificaciones:edit')) {
+                <button class="icon-button" type="button" (click)="openEdit(notification)" aria-label="Editar notificación">
+                  <app-icon name="edit" [size]="16" />
+                </button>
+              }
+              @if (auth.hasPermission('notificaciones:delete')) {
+                <button class="icon-button" type="button" (click)="remove(notification)" aria-label="Eliminar notificación">
+                  <app-icon name="trash" [size]="16" />
+                </button>
+              }
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar notificación' : 'Nueva notificación'"
+  subtitle="Define el destinatario, el tipo y el contenido del mensaje."
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field">
+        <label for="notification-recipient">Destinatario</label>
+        <select id="notification-recipient" formControlName="usuario">
+          <option [value]="0" disabled>Selecciona un destinatario</option>
+          @for (recipient of recipients(); track recipient.id) {
+            <option [value]="recipient.id">{{ recipient.nombre }} · {{ recipient.detail }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="notification-type">Tipo</label>
+        <select id="notification-type" formControlName="tipo">
+          @for (type of notificationTypes | keyvalue; track type.key) {
+            <option [value]="type.key">{{ type.value }}</option>
+          }
+        </select>
+      </div>
+      <div class="field field--full">
+        <label for="notification-title">Título</label>
+        <input id="notification-title" formControlName="titulo" placeholder="Ej. Recordatorio de entrenamiento" />
+      </div>
+      <div class="field field--full">
+        <label for="notification-message">Mensaje</label>
+        <textarea id="notification-message" formControlName="mensaje" rows="4"></textarea>
+      </div>
+      <div class="field">
+        <label for="notification-schedule">Programar para</label>
+        <input id="notification-schedule" type="datetime-local" formControlName="programada_at" />
+        <small>Déjalo vacío para envío inmediato.</small>
+      </div>
+      @if (editing()) {
+        <div class="field">
+          <label for="notification-state">Estado</label>
+          <select id="notification-state" formControlName="estado">
+            @for (state of notificationStates | keyvalue; track state.key) {
+              <option [value]="state.key">{{ state.value }}</option>
+            }
+          </select>
+        </div>
+      }
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear notificación' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

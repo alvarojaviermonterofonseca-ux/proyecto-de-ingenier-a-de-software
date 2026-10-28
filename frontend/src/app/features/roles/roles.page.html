@@ -1,0 +1,186 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Seguridad"
+    title="Roles y permisos"
+    subtitle="Define qué puede ver y hacer cada rol dentro del panel."
+  >
+    @if (auth.hasPermission('roles:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nuevo rol
+      </button>
+    }
+  </app-page-header>
+
+  @if (error()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ error() }}</span>
+      <button class="link-button" type="button" (click)="load()">Reintentar</button>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="loading-state">
+      <span class="spinner"></span>
+      <span>Cargando roles...</span>
+    </div>
+  } @else if (roles().length === 0) {
+    <section class="card">
+      <app-empty-state
+        icon="shield"
+        title="No hay roles"
+        message="Crea el primer rol para organizar los accesos del equipo."
+      />
+    </section>
+  } @else {
+    <div class="role-grid">
+      @for (role of roles(); track role.id) {
+        <article class="role-card">
+          <header>
+            <span class="role-card__icon"><app-icon name="shield" [size]="20" /></span>
+            <div>
+              <h2>{{ role.nombre }}</h2>
+              <app-status-badge
+                [label]="role.is_active ? 'Activo' : 'Inactivo'"
+                [tone]="role.is_active ? 'success' : 'neutral'"
+              />
+            </div>
+          </header>
+          <p class="role-card__description">
+            {{ role.descripcion || 'Sin descripción configurada.' }}
+          </p>
+          <div class="role-card__stats">
+            <div>
+              <strong>{{ role.total_usuarios }}</strong>
+              <span>usuarios</span>
+            </div>
+            <div>
+              <strong>{{ role.permisos.length }}</strong>
+              <span>permisos</span>
+            </div>
+          </div>
+          <div class="role-card__actions">
+            @if (auth.hasPermission('roles:edit')) {
+              <button class="button button--secondary button--sm" type="button" (click)="openEdit(role)">
+                <app-icon name="edit" [size]="15" />
+                Editar
+              </button>
+            }
+            @if (auth.hasPermission('roles:delete')) {
+              <button class="icon-button" type="button" (click)="remove(role)" aria-label="Eliminar rol">
+                <app-icon name="trash" [size]="16" />
+              </button>
+            }
+          </div>
+        </article>
+      }
+    </div>
+  }
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar rol' : 'Nuevo rol'"
+  subtitle="El nombre identifica el rol; los permisos definen sus capacidades."
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field">
+        <label for="role-nombre">Nombre del rol</label>
+        <input id="role-nombre" formControlName="nombre" placeholder="Ej. coordinador" />
+        @if (editing() && editing()!.total_usuarios > 0) {
+          <p class="field-help">No se puede cambiar el nombre de un rol ya asignado.</p>
+        }
+        @if (form.controls.nombre.touched && form.controls.nombre.invalid) {
+          <p class="field-error">El nombre es obligatorio.</p>
+        }
+      </div>
+      <div class="field">
+        <label for="role-descripcion">Descripción</label>
+        <input id="role-descripcion" formControlName="descripcion" placeholder="Propósito del rol" />
+      </div>
+      <label class="check-field">
+        <input type="checkbox" formControlName="is_active" />
+        <span>Rol activo</span>
+      </label>
+    </div>
+
+    <div class="permissions-section">
+      <div class="permissions-section__head">
+        <div>
+          <h3>Matriz de permisos</h3>
+          <p>
+            {{ selected().size }} de {{ totalPermissions() }} permisos seleccionados.
+            @if (!canEditPermissions()) {
+              Solo un administrador puede modificar esta matriz.
+            }
+          </p>
+        </div>
+        <div class="search-box permissions-search">
+          <app-icon name="search" [size]="16" />
+          <input
+            type="search"
+            placeholder="Buscar permiso"
+            (input)="updatePermissionQuery($any($event.target).value)"
+          />
+        </div>
+      </div>
+
+      @if (groups().length === 0) {
+        <p class="muted">No hay permisos que coincidan con la búsqueda.</p>
+      } @else {
+        <div class="permission-groups">
+          @for (group of groups(); track group.resource.code) {
+            <fieldset class="permission-group" [disabled]="!canEditPermissions()">
+              <legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    [checked]="groupSelected(group)"
+                    (change)="toggleGroup(group, $any($event.target).checked)"
+                  />
+                  <span>{{ group.resource.label }}</span>
+                </label>
+                <small>{{ group.permissions.length }}</small>
+              </legend>
+              <div class="permission-group__items">
+                @for (permission of group.permissions; track permission.id) {
+                  <label class="permission-item">
+                    <input
+                      type="checkbox"
+                      [checked]="isSelected(permission.codigo)"
+                      (change)="togglePermission(permission.codigo, $any($event.target).checked)"
+                    />
+                    <span>
+                      <strong>{{ permission.accion }}</strong>
+                      <small>{{ permission.codigo }}</small>
+                    </span>
+                  </label>
+                }
+              </div>
+            </fieldset>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear rol' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

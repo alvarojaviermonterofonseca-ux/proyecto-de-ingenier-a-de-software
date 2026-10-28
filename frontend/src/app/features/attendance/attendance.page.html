@@ -1,0 +1,201 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Operación"
+    title="Asistencias"
+    subtitle="Controla entradas, salidas y permanencia de los clientes en el gimnasio."
+  >
+    @if (auth.hasPermission('asistencias:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Registrar entrada
+      </button>
+    }
+  </app-page-header>
+
+  <div class="metric-grid attendance-metrics">
+    <article class="metric-card">
+      <p class="metric-card__label">Asistencias hoy</p>
+      <p class="metric-card__value">{{ stats().today }}</p>
+      <p class="metric-card__hint">Entradas registradas</p>
+    </article>
+    <article class="metric-card">
+      <p class="metric-card__label">Dentro del gimnasio</p>
+      <p class="metric-card__value">{{ stats().open }}</p>
+      <p class="metric-card__hint">Sin salida registrada</p>
+    </article>
+    <article class="metric-card">
+      <p class="metric-card__label">Permanencia promedio</p>
+      <p class="metric-card__value">{{ stats().average }}</p>
+      <p class="metric-card__hint">Sesiones cerradas</p>
+    </article>
+  </div>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar cliente"
+          [value]="search()"
+          (input)="updateSearch($any($event.target).value)"
+        />
+      </div>
+      <select aria-label="Filtrar por estado" [value]="statusFilter()" (change)="updateStatus($any($event.target).value)">
+        <option value="">Todos los registros</option>
+        <option value="open">Dentro del gimnasio</option>
+        <option value="closed">Con salida</option>
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando asistencias...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="clock"
+        title="Sin asistencias"
+        message="No hay registros que coincidan con los filtros seleccionados."
+      />
+    } @else {
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Entrada</th>
+              <th>Salida</th>
+              <th>Permanencia</th>
+              <th>Método</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (record of filtered(); track record.id) {
+              <tr>
+                <td>
+                  <div class="cell-title">
+                    <app-avatar [name]="record.cliente_detalle.nombre" [size]="34" />
+                    <div>
+                      <strong>{{ record.cliente_detalle.nombre }}</strong>
+                      <span>{{ record.cliente_detalle.correo }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <strong class="time">{{ formatTime(record.entrada_at) }}</strong>
+                  <span class="subtle">{{ formatDate(record.entrada_at) }}</span>
+                </td>
+                <td>
+                  @if (record.salida_at) {
+                    <strong class="time">{{ formatTime(record.salida_at) }}</strong>
+                    <span class="subtle">{{ formatDate(record.salida_at) }}</span>
+                  } @else {
+                    <span class="muted">Pendiente</span>
+                  }
+                </td>
+                <td>{{ duration(record) }}</td>
+                <td>{{ methodLabel(record.metodo_entrada) }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="record.salida_at ? 'Completada' : 'En curso'"
+                    [tone]="record.salida_at ? 'success' : 'warning'"
+                  />
+                </td>
+                <td>
+                  <div class="row-actions">
+                    @if (!record.salida_at && auth.hasPermission('asistencias:edit')) {
+                      <button class="button button--secondary button--sm" type="button" (click)="checkout(record)">
+                        Registrar salida
+                      </button>
+                    }
+                    @if (auth.hasPermission('asistencias:edit')) {
+                      <button class="icon-button" type="button" (click)="openEdit(record)" aria-label="Editar asistencia">
+                        <app-icon name="edit" [size]="16" />
+                      </button>
+                    }
+                    @if (auth.hasPermission('asistencias:delete')) {
+                      <button class="icon-button" type="button" (click)="remove(record)" aria-label="Eliminar asistencia">
+                        <app-icon name="trash" [size]="16" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar asistencia' : 'Registrar entrada'"
+  [subtitle]="editing() ? 'Corrige los horarios del registro.' : 'Selecciona el cliente y registra su ingreso.'"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="attendance-cliente">Cliente</label>
+        <select id="attendance-cliente" formControlName="cliente">
+          <option [value]="0" disabled>Selecciona un cliente</option>
+          @for (client of clients(); track client.usuario) {
+            <option [value]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="attendance-metodo">Método de entrada</label>
+        <select id="attendance-metodo" formControlName="metodo_entrada">
+          @for (method of methods | keyvalue; track method.key) {
+            <option [value]="method.key">{{ method.value }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="attendance-entrada">Fecha y hora de entrada</label>
+        <input id="attendance-entrada" type="datetime-local" formControlName="entrada_at" />
+      </div>
+      <div class="field">
+        <label for="attendance-salida">Fecha y hora de salida</label>
+        <input id="attendance-salida" type="datetime-local" formControlName="salida_at" />
+      </div>
+      @if (!editing()) {
+        <div class="field">
+          <label for="attendance-evento">Identificador del evento</label>
+          <input id="attendance-evento" formControlName="identificador_evento" placeholder="Opcional para QR o facial" />
+        </div>
+      }
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Registrar entrada' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

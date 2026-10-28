@@ -6,7 +6,7 @@ env/
 
 # Archivos de Python
 
-**pycache**/
+__pycache__/
 *.py[cod]
 
 # Archivos de Django
@@ -31,3 +31,6 @@ media/
 *.log
 .DS_Store
 Thumbs.db
+
+# Rutas expandidas por error (por ejemplo '~/')
+~/

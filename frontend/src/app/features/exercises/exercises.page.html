@@ -1,0 +1,128 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Operación"
+    title="Ejercicios"
+    subtitle="Catálogo de movimientos disponible para construir planes de entrenamiento."
+  >
+    @if (auth.hasPermission('ejercicios:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nuevo ejercicio
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar ejercicio"
+          [value]="search()"
+          (input)="updateSearch($any($event.target).value)"
+        />
+      </div>
+      <select aria-label="Filtrar por grupo muscular" [value]="groupFilter()" (change)="groupFilter.set($any($event.target).value)">
+        <option value="">Todos los grupos</option>
+        @for (group of groups(); track group) {
+          <option [value]="group">{{ humanize(group) }}</option>
+        }
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando ejercicios...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="dumbbell"
+        title="Sin ejercicios"
+        message="Crea movimientos para reutilizarlos en los planes de entrenamiento."
+      />
+    } @else {
+      <div class="exercise-grid">
+        @for (exercise of filtered(); track exercise.id) {
+          <article class="exercise-card">
+            <div class="exercise-card__icon"><app-icon name="dumbbell" [size]="19" /></div>
+            <div class="exercise-card__body">
+              <div class="exercise-card__title">
+                <h2>{{ exercise.nombre }}</h2>
+                <app-status-badge [label]="exercise.is_active ? 'Activo' : 'Inactivo'" [tone]="exercise.is_active ? 'success' : 'neutral'" />
+              </div>
+              <p>{{ exercise.descripcion || 'Sin descripción.' }}</p>
+              @if (exercise.grupo_muscular) {
+                <span class="tag">{{ humanize(exercise.grupo_muscular) }}</span>
+              }
+            </div>
+            <div class="exercise-card__actions">
+              @if (auth.hasPermission('ejercicios:edit')) {
+                <button class="icon-button" type="button" (click)="openEdit(exercise)" aria-label="Editar ejercicio">
+                  <app-icon name="edit" [size]="16" />
+                </button>
+              }
+              @if (auth.hasPermission('ejercicios:delete')) {
+                <button class="icon-button" type="button" (click)="remove(exercise)" aria-label="Eliminar ejercicio">
+                  <app-icon name="trash" [size]="16" />
+                </button>
+              }
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar ejercicio' : 'Nuevo ejercicio'"
+  subtitle="Un catálogo claro facilita la creación de planes."
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="exercise-nombre">Nombre</label>
+        <input id="exercise-nombre" formControlName="nombre" placeholder="Ej. Sentadilla goblet" />
+        @if (form.controls.nombre.touched && form.controls.nombre.invalid) {
+          <p class="field-error">El nombre es obligatorio.</p>
+        }
+      </div>
+      <div class="field field--full">
+        <label for="exercise-grupo">Grupo muscular</label>
+        <input id="exercise-grupo" formControlName="grupo_muscular" placeholder="Ej. piernas, espalda, core" />
+      </div>
+      <div class="field field--full">
+        <label for="exercise-descripcion">Descripción</label>
+        <textarea id="exercise-descripcion" formControlName="descripcion" rows="3"></textarea>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear ejercicio' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

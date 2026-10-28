@@ -1,0 +1,359 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.login {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: minmax(24rem, 0.95fr) minmax(26rem, 1.05fr);
+}
+
+.login__story {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+  color: #e4f3e9;
+  background:
+    linear-gradient(145deg, rgb(8 31 20 / 12%), rgb(8 31 20 / 72%)),
+    radial-gradient(circle at 15% 15%, #256e4a, transparent 38rem),
+    #0c2a1c;
+}
+
+.story__glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.story__glow--one {
+  top: -10rem;
+  right: -10rem;
+  width: 30rem;
+  height: 30rem;
+  border: 1px solid rgb(200 243 123 / 16%);
+  background: radial-gradient(circle, rgb(200 243 123 / 12%), transparent 65%);
+}
+
+.story__glow--two {
+  right: 4%;
+  bottom: 6%;
+  width: 16rem;
+  height: 16rem;
+  border: 1px solid rgb(255 255 255 / 5%);
+  background: radial-gradient(circle, rgb(200 243 123 / 8%), transparent 65%);
+}
+
+.brand {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.7rem;
+  color: #fff;
+  text-decoration: none;
+}
+
+.brand__mark {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: 0.85rem;
+  color: #12331f;
+  background: var(--gc-lime);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 25%);
+}
+
+.brand strong {
+  display: block;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.brand small {
+  display: block;
+  color: #9dc4ac;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.brand--mobile {
+  display: none;
+}
+
+.story__content {
+  position: relative;
+  z-index: 1;
+  max-width: 34rem;
+  margin: clamp(3rem, 9vh, 7rem) 0;
+}
+
+.story__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1.2rem;
+  padding: 0.32rem 0.65rem;
+  border: 1px solid rgb(200 243 123 / 28%);
+  border-radius: 999px;
+  color: var(--gc-lime);
+  background: rgb(200 243 123 / 8%);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.story__content h1 {
+  margin: 0 0 1.1rem;
+  color: #f6fff9;
+  font-size: clamp(2.35rem, 4.3vw, 4.4rem);
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 0.99;
+}
+
+.story__content h1 em {
+  color: var(--gc-lime);
+  font-style: normal;
+}
+
+.story__content > p {
+  max-width: 30rem;
+  margin: 0;
+  color: #b7d2c1;
+  font-size: clamp(0.95rem, 1.3vw, 1.08rem);
+  line-height: 1.65;
+}
+
+.story__stats {
+  display: grid;
+  max-width: 31rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin-top: 2.2rem;
+}
+
+.story__stats div {
+  padding: 0.85rem 0.8rem;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 4%);
+  backdrop-filter: blur(5px);
+}
+
+.story__stats strong {
+  display: block;
+  color: #fff;
+  font-size: 1.3rem;
+  letter-spacing: -0.03em;
+}
+
+.story__stats span {
+  display: block;
+  margin-top: 0.12rem;
+  color: #91b4a0;
+  font-size: 0.69rem;
+  font-weight: 650;
+}
+
+.story__quote {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  max-width: 31rem;
+  gap: 0.55rem;
+  color: #8fb39b;
+}
+
+.story__quote app-icon {
+  flex: none;
+  color: var(--gc-lime);
+}
+
+.story__quote p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.login__panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(2rem, 6vw, 5rem);
+  background: var(--gc-surface);
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+}
+
+.login__box {
+  width: min(26rem, 100%);
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--gc-primary);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.login__heading h2 {
+  margin: 0 0 0.45rem;
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  letter-spacing: -0.045em;
+}
+
+.login__heading p {
+  margin: 0 0 1.5rem;
+  color: var(--gc-muted);
+  font-size: 0.9rem;
+}
+
+form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+
+.input-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-shell > app-icon {
+  position: absolute;
+  left: 0.8rem;
+  color: var(--gc-muted);
+  pointer-events: none;
+}
+
+.input-shell input {
+  min-height: 3rem;
+  padding-right: 2.65rem;
+  padding-left: 2.55rem;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.35rem;
+  display: grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0.45rem;
+  color: var(--gc-muted);
+  background: transparent;
+}
+
+.password-toggle:hover {
+  color: var(--gc-ink);
+  background: var(--gc-surface-3);
+}
+
+.submit {
+  width: 100%;
+  min-height: 3rem;
+  margin-top: 0.35rem;
+  justify-content: space-between;
+  padding-inline: 1.05rem;
+  font-size: 0.9rem;
+}
+
+.submit .spinner {
+  margin-right: auto;
+}
+
+.spinner--small {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+  border-color: rgb(15 42 27 / 25%);
+  border-top-color: #0f2a1b;
+}
+
+.login__support {
+  margin: 1.4rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.77rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.login__footer {
+  position: absolute;
+  right: 0;
+  bottom: 1.25rem;
+  left: 0;
+  margin: 0;
+  color: var(--gc-muted);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .login {
+    grid-template-columns: 1fr;
+  }
+
+  .login__story {
+    display: none;
+  }
+
+  .brand--mobile {
+    position: absolute;
+    top: 1.35rem;
+    left: 1.35rem;
+    display: flex;
+  }
+
+  .brand--mobile .brand__mark {
+    width: 2.35rem;
+    height: 2.35rem;
+    color: #12331f;
+  }
+
+  .brand--mobile strong {
+    color: var(--gc-ink);
+  }
+
+  .brand--mobile small {
+    color: var(--gc-muted);
+  }
+
+  .login__panel {
+    min-height: 100vh;
+    padding: 6rem 1.4rem 4.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .login__panel {
+    align-items: flex-start;
+  }
+
+  .theme-toggle {
+    top: 1.25rem;
+    right: 1.25rem;
+  }
+}

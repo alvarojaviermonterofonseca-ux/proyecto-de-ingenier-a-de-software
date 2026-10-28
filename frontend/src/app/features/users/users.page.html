@@ -1,0 +1,342 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Gestión"
+    title="Usuarios"
+    subtitle="Administra las cuentas del gimnasio, sus roles y el estado de acceso."
+  >
+    @if (auth.hasPermission('usuarios:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="user-plus" [size]="17" />
+        Nuevo usuario
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input [formControl]="search" type="search" placeholder="Buscar por nombre, correo o usuario" />
+      </div>
+      <select [formControl]="roleFilter" aria-label="Filtrar por rol">
+        <option value="">Todos los roles</option>
+        @for (role of roles(); track role.id) {
+          <option [value]="role.id">{{ roleLabel(role.nombre) }}</option>
+        }
+      </select>
+      <select [formControl]="activeFilter" aria-label="Filtrar por estado">
+        <option value="">Todos los estados</option>
+        <option value="true">Activos</option>
+        <option value="false">Inactivos</option>
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error notice--inline" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state">
+        <span class="spinner"></span>
+        <span>Cargando usuarios...</span>
+      </div>
+    } @else if (users().length === 0) {
+      <app-empty-state
+        icon="users"
+        title="No hay usuarios"
+        message="No se encontraron cuentas con los filtros seleccionados."
+      >
+        @if (auth.hasPermission('usuarios:create')) {
+          <button class="button button--primary button--sm" type="button" (click)="openCreate()">
+            Crear el primero
+          </button>
+        }
+      </app-empty-state>
+    } @else {
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Rol principal</th>
+              <th>Roles adicionales</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (user of users(); track user.id) {
+              <tr>
+                <td>
+                  <div class="cell-title">
+                    <app-avatar [name]="user.nombre" [size]="38" />
+                    <div>
+                      <strong>{{ user.nombre }}</strong>
+                      <span>{{ user.correo }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="tag">{{ roleLabel(user.rol_nombre) }}</span></td>
+                <td>
+                  @if (user.roles_efectivos.length > 1) {
+                    <div class="tag-list">
+                      @for (role of user.roles_efectivos; track role.id) {
+                        <span class="tag tag--muted">{{ roleLabel(role.nombre) }}</span>
+                      }
+                    </div>
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </td>
+                <td>{{ user.telefono || '—' }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="user.is_active ? 'Activo' : 'Inactivo'"
+                    [tone]="user.is_active ? 'success' : 'neutral'"
+                  />
+                </td>
+                <td>
+                  <div class="row-actions">
+                    @if (auth.hasPermission('usuarios:edit')) {
+                      <button class="icon-button" type="button" (click)="openEdit(user)" aria-label="Editar usuario">
+                        <app-icon name="edit" [size]="16" />
+                      </button>
+                    }
+                    @if (auth.hasPermission('usuarios:delete')) {
+                      <button class="icon-button" type="button" (click)="remove(user)" aria-label="Eliminar usuario">
+                        <app-icon name="trash" [size]="16" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <app-pagination
+        [page]="page()"
+        [count]="count()"
+        [pageSize]="pageSize"
+        (pageChange)="changePage($event)"
+      />
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar usuario' : 'Nuevo usuario'"
+  [subtitle]="editing() ? 'Actualiza la identidad y el rol principal.' : 'Crea la cuenta y completa el perfil según el rol.'"
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-section">
+      <h3>Identidad y acceso</h3>
+      <p class="form-section__hint">Los datos de acceso se usan para iniciar sesión en el panel.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="user-nombre">Nombre completo</label>
+          <input id="user-nombre" formControlName="nombre" autocomplete="name" />
+          @if (form.controls.nombre.touched && form.controls.nombre.invalid) {
+            <p class="field-error">El nombre es obligatorio.</p>
+          }
+        </div>
+        <div class="field">
+          <label for="user-correo">Correo electrónico</label>
+          <input id="user-correo" type="email" formControlName="correo" autocomplete="email" />
+          @if (form.controls.correo.touched && form.controls.correo.invalid) {
+            <p class="field-error">Ingresa un correo válido.</p>
+          }
+        </div>
+        <div class="field">
+          <label for="user-rol">Rol principal</label>
+          <select id="user-rol" formControlName="rol">
+            <option [value]="0" disabled>Selecciona un rol</option>
+            @for (role of roles(); track role.id) {
+              <option [value]="role.id">{{ roleLabel(role.nombre) }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="user-username">Nombre de usuario</label>
+          <input id="user-username" formControlName="username" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="user-telefono">Teléfono</label>
+          <input id="user-telefono" formControlName="telefono" autocomplete="tel" />
+        </div>
+        <div class="field">
+          <label for="user-password">
+            Contraseña {{ editing() ? '(opcional)' : '' }}
+          </label>
+          <input
+            id="user-password"
+            type="password"
+            formControlName="contrasena"
+            [autocomplete]="editing() ? 'new-password' : 'new-password'"
+          />
+          <p class="field-help">
+            @if (editing()) {
+              Déjala vacía para conservar la contraseña actual.
+            } @else {
+              Mínimo 8 caracteres.
+            }
+          </p>
+          @if (form.controls.contrasena.touched && form.controls.contrasena.invalid) {
+            <p class="field-error">La contraseña debe tener al menos 8 caracteres.</p>
+          }
+        </div>
+        <label class="check-field">
+          <input type="checkbox" formControlName="is_active" />
+          <span>Cuenta activa</span>
+        </label>
+      </div>
+    </div>
+
+    @if (!editing()) {
+      <div class="form-section">
+        <h3>Perfil de {{ selectedRoleName() ? roleLabel(selectedRoleName()) : 'rol' }}</h3>
+        <p class="form-section__hint">Estos datos alimentan el módulo operativo correspondiente.</p>
+
+        @if (selectedRoleName() === 'cliente') {
+          <div class="form-grid form-grid--3">
+            <div class="field">
+              <label for="user-tipo-doc">Tipo de documento</label>
+              <select id="user-tipo-doc" formControlName="tipo_documento">
+                <option value="">Sin especificar</option>
+                <option value="CC">Cédula de ciudadanía</option>
+                <option value="CE">Cédula de extranjería</option>
+                <option value="TI">Tarjeta de identidad</option>
+                <option value="PA">Pasaporte</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="user-num-doc">Número de documento</label>
+              <input id="user-num-doc" formControlName="numero_documento" />
+            </div>
+            <div class="field">
+              <label for="user-nacimiento">Fecha de nacimiento</label>
+              <input id="user-nacimiento" type="date" formControlName="fecha_nacimiento" />
+            </div>
+            <div class="field field--full">
+              <label for="user-objetivo">Objetivo</label>
+              <input id="user-objetivo" formControlName="objetivo" placeholder="Ej. Pérdida de grasa, fuerza, movilidad" />
+            </div>
+            <div class="field">
+              <label for="user-peso">Peso (kg)</label>
+              <input id="user-peso" type="number" step="0.1" formControlName="peso_kg" />
+            </div>
+            <div class="field">
+              <label for="user-estatura">Estatura (cm)</label>
+              <input id="user-estatura" type="number" step="1" formControlName="estatura_cm" />
+            </div>
+          </div>
+        }
+
+        @if (selectedRoleName() === 'entrenador') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="user-especialidad">Especialidad</label>
+              <input id="user-especialidad" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="user-certificacion">Certificación</label>
+              <input id="user-certificacion" formControlName="certificacion" />
+            </div>
+            <div class="field">
+              <label for="user-ingreso">Fecha de ingreso</label>
+              <input id="user-ingreso" type="date" formControlName="fecha_ingreso" />
+            </div>
+            <div class="field field--full">
+              <label for="user-bio">Biografía</label>
+              <textarea id="user-bio" formControlName="biografia" rows="3"></textarea>
+            </div>
+          </div>
+        }
+
+        @if (selectedRoleName() === 'terapeuta') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="user-especialidad-t">Especialidad</label>
+              <input id="user-especialidad-t" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="user-licencia">Licencia profesional</label>
+              <input id="user-licencia" formControlName="licencia_profesional" />
+            </div>
+            <div class="field">
+              <label for="user-ingreso-t">Fecha de ingreso</label>
+              <input id="user-ingreso-t" type="date" formControlName="fecha_ingreso" />
+            </div>
+          </div>
+        }
+
+        @if (selectedRoleName() === 'recepcionista') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="user-ingreso-r">Fecha de ingreso</label>
+              <input id="user-ingreso-r" type="date" formControlName="fecha_ingreso" />
+            </div>
+            <div class="field">
+              <label for="user-turno">Turno preferido</label>
+              <select id="user-turno" formControlName="turno_preferido">
+                <option value="">Sin especificar</option>
+                <option value="mañana">Mañana</option>
+                <option value="tarde">Tarde</option>
+                <option value="noche">Noche</option>
+              </select>
+            </div>
+          </div>
+        }
+
+        @if (selectedRoleName() === 'administrador') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="user-cargo">Cargo</label>
+              <input id="user-cargo" formControlName="cargo" />
+            </div>
+            <div class="field">
+              <label for="user-ingreso-a">Fecha de ingreso</label>
+              <input id="user-ingreso-a" type="date" formControlName="fecha_ingreso" />
+            </div>
+            <div class="field">
+              <label for="user-nivel">Nivel de permisos</label>
+              <select id="user-nivel" formControlName="nivel_permisos">
+                <option value="operativo">Operativo</option>
+                <option value="gestion">Gestión</option>
+                <option value="total">Total</option>
+              </select>
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear usuario' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

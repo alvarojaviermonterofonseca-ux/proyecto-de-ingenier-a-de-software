@@ -1,0 +1,56 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.filters select {
+  width: auto;
+  min-width: 10rem;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.actor {
+  font-size: 0.84rem;
+}
+
+.event-details {
+  position: relative;
+}
+
+.event-details summary {
+  color: var(--gc-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.event-details pre {
+  position: absolute;
+  z-index: 5;
+  top: 1.5rem;
+  right: 0;
+  width: min(28rem, 70vw);
+  max-height: 16rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.8rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.6rem;
+  color: var(--gc-ink-soft);
+  background: var(--gc-surface);
+  box-shadow: var(--gc-shadow);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .filters select {
+    width: 100%;
+  }
+}

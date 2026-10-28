@@ -1,0 +1,231 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Personas"
+    title="Clientes"
+    subtitle="Perfiles, objetivos y datos de contacto de las personas que entrenan contigo."
+  >
+    @if (canCreate()) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="user-plus" [size]="17" />
+        Nuevo cliente
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input [formControl]="search" type="search" placeholder="Buscar por nombre, correo o documento" />
+      </div>
+      <select [formControl]="documentFilter" aria-label="Filtrar por documento">
+        <option value="">Todos los documentos</option>
+        <option value="CC">Cédula de ciudadanía</option>
+        <option value="CE">Cédula de extranjería</option>
+        <option value="TI">Tarjeta de identidad</option>
+        <option value="PA">Pasaporte</option>
+      </select>
+      <select [formControl]="activeFilter" aria-label="Filtrar por estado">
+        <option value="">Todos</option>
+        <option value="true">Activos</option>
+        <option value="false">Inactivos</option>
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando clientes...</span></div>
+    } @else if (clients().length === 0) {
+      <app-empty-state
+        icon="users"
+        title="No hay clientes"
+        message="No se encontraron perfiles con los filtros seleccionados."
+      />
+    } @else {
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Documento</th>
+              <th>Objetivo</th>
+              <th>Medidas</th>
+              <th>Registro</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (client of clients(); track client.usuario) {
+              <tr>
+                <td>
+                  <div class="cell-title">
+                    <app-avatar [name]="client.usuario_detalle.nombre" [size]="38" />
+                    <div>
+                      <strong>{{ client.usuario_detalle.nombre }}</strong>
+                      <span>{{ client.usuario_detalle.correo }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  @if (client.numero_documento) {
+                    <strong class="doc">{{ client.numero_documento }}</strong>
+                    <span class="subtle">{{ client.tipo_documento ?? '' }}</span>
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </td>
+                <td>{{ client.objetivo || '—' }}</td>
+                <td>
+                  @if (client.peso_kg || client.estatura_cm) {
+                    <span>{{ client.peso_kg ? client.peso_kg + ' kg' : '' }}</span>
+                    @if (client.peso_kg && client.estatura_cm) {
+                      <span class="muted"> · </span>
+                    }
+                    <span>{{ client.estatura_cm ? client.estatura_cm + ' cm' : '' }}</span>
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </td>
+                <td>{{ formatDate(client.created_at) }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="client.is_active ? 'Activo' : 'Inactivo'"
+                    [tone]="client.is_active ? 'success' : 'neutral'"
+                  />
+                </td>
+                <td>
+                  <div class="row-actions">
+                    @if (auth.hasPermission('clientes:edit')) {
+                      <button class="icon-button" type="button" (click)="openEdit(client)" aria-label="Editar cliente">
+                        <app-icon name="edit" [size]="16" />
+                      </button>
+                    }
+                    @if (auth.hasPermission('clientes:delete')) {
+                      <button class="icon-button" type="button" (click)="remove(client)" aria-label="Eliminar cliente">
+                        <app-icon name="trash" [size]="16" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <app-pagination
+        [page]="page()"
+        [count]="count()"
+        [pageSize]="pageSize"
+        (pageChange)="changePage($event)"
+      />
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar cliente' : 'Nuevo cliente'"
+  [subtitle]="editing() ? 'Actualiza los datos del perfil. La identidad se administra desde Usuarios.' : 'Se creará la cuenta de acceso y el perfil de cliente.'"
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-section">
+      <h3>Identidad</h3>
+      @if (editing()) {
+        <p class="form-section__hint">Para cambiar nombre, correo o contraseña usa el módulo de Usuarios.</p>
+      }
+      <div class="form-grid">
+        <div class="field">
+          <label for="client-nombre">Nombre completo</label>
+          <input id="client-nombre" formControlName="nombre" />
+        </div>
+        <div class="field">
+          <label for="client-correo">Correo</label>
+          <input id="client-correo" type="email" formControlName="correo" />
+        </div>
+        <div class="field">
+          <label for="client-telefono">Teléfono</label>
+          <input id="client-telefono" formControlName="telefono" />
+        </div>
+        @if (!editing()) {
+          <div class="field">
+            <label for="client-password">Contraseña inicial</label>
+            <input id="client-password" type="password" formControlName="contrasena" />
+            @if (form.controls.contrasena.touched && form.controls.contrasena.invalid) {
+              <p class="field-error">Mínimo 8 caracteres.</p>
+            }
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h3>Perfil y objetivo</h3>
+      <div class="form-grid form-grid--3">
+        <div class="field">
+          <label for="client-tipo-doc">Tipo de documento</label>
+          <select id="client-tipo-doc" formControlName="tipo_documento">
+            <option value="">Sin especificar</option>
+            <option value="CC">Cédula de ciudadanía</option>
+            <option value="CE">Cédula de extranjería</option>
+            <option value="TI">Tarjeta de identidad</option>
+            <option value="PA">Pasaporte</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="client-num-doc">Número de documento</label>
+          <input id="client-num-doc" formControlName="numero_documento" />
+        </div>
+        <div class="field">
+          <label for="client-nacimiento">Fecha de nacimiento</label>
+          <input id="client-nacimiento" type="date" formControlName="fecha_nacimiento" />
+        </div>
+        <div class="field field--full">
+          <label for="client-objetivo">Objetivo</label>
+          <input id="client-objetivo" formControlName="objetivo" placeholder="Ej. Pérdida de grasa, fuerza, movilidad" />
+        </div>
+        <div class="field">
+          <label for="client-peso">Peso (kg)</label>
+          <input id="client-peso" type="number" step="0.1" formControlName="peso_kg" />
+        </div>
+        <div class="field">
+          <label for="client-estatura">Estatura (cm)</label>
+          <input id="client-estatura" type="number" step="1" formControlName="estatura_cm" />
+        </div>
+        <label class="check-field">
+          <input type="checkbox" formControlName="is_active" />
+          <span>Perfil activo</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear cliente' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

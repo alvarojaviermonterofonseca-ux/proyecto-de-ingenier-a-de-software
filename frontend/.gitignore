@@ -1,0 +1,8 @@
+# Angular / Node artifacts
+node_modules/
+dist/
+.angular/
+coverage/
+
+# Local environment overrides
+src/environments/environment.local.ts

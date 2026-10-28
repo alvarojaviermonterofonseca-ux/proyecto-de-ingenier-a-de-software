@@ -1,0 +1,212 @@
+<div class="page-stack fade-in">
+  <section class="hero">
+    <div class="hero__copy">
+      <span class="hero__eyebrow">{{ greeting() }}</span>
+      <h2>{{ auth.user()?.nombre?.split(' ')?.[0] }}, tu operación está en marcha.</h2>
+      <p>
+        @if (summary()?.es_cliente) {
+          Este es el resumen de tu actividad y tus planes de acompañamiento.
+        } @else {
+          Revisa lo que está pasando hoy y prioriza lo que necesita atención.
+        }
+      </p>
+      <div class="hero__meta">
+        <span class="tag">{{ role() }}</span>
+        <span class="muted">{{ auth.user()?.correo }}</span>
+      </div>
+    </div>
+
+    <div class="hero__actions">
+      <button class="button button--secondary" type="button" (click)="load()" [disabled]="loading()">
+        <app-icon name="refresh" [size]="17" />
+        Actualizar
+      </button>
+      @for (action of actions().slice(0, 2); track action.route) {
+        <a
+          class="button button--primary"
+          [routerLink]="action.route"
+          [queryParams]="action.queryParams ?? null"
+        >
+          <app-icon [name]="action.icon" [size]="17" />
+          {{ action.label }}
+        </a>
+      }
+    </div>
+  </section>
+
+  @if (error()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ error() }}</span>
+      <button class="link-button" type="button" (click)="load()">Reintentar</button>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="metric-grid">
+      @for (item of [1, 2, 3, 4]; track item) {
+        <div class="metric-skeleton">
+          <span class="skeleton" style="width: 55%; height: 0.8rem"></span>
+          <span class="skeleton" style="width: 35%; height: 2rem"></span>
+          <span class="skeleton" style="width: 70%; height: 0.7rem"></span>
+        </div>
+      }
+    </div>
+  } @else {
+    @if (summary(); as data) {
+    <div class="metric-grid">
+      @for (metric of metrics(); track metric.label) {
+        <article class="metric-card" [class.metric-card--attention]="metric.accent">
+          <div class="metric-card__label">
+            <span>{{ metric.label }}</span>
+            <span class="metric-card__icon"><app-icon [name]="metric.icon" [size]="18" /></span>
+          </div>
+          <p class="metric-card__value">{{ metric.value }}</p>
+          <p class="metric-card__hint">{{ metric.hint }}</p>
+        </article>
+      }
+    </div>
+
+    @if (actions().length > 2) {
+      <div class="quick-strip">
+        <span class="quick-strip__label">Acciones rápidas</span>
+        @for (action of actions().slice(2); track action.route) {
+          <a
+            class="quick-strip__link"
+            [routerLink]="action.route"
+            [queryParams]="action.queryParams ?? null"
+          >
+            <app-icon [name]="action.icon" [size]="17" />
+            {{ action.label }}
+          </a>
+        }
+      </div>
+    }
+
+    <div class="content-grid">
+      <section class="card">
+        <header class="card__header">
+          <div>
+            <h2>Asistencias recientes</h2>
+            <p>Últimos movimientos registrados en recepción.</p>
+          </div>
+          @if (auth.hasPermission('asistencias:view')) {
+            <a class="link-button" routerLink="/asistencias">Ver todas</a>
+          }
+        </header>
+
+        @if (data.asistencias_recientes.length === 0) {
+          <app-empty-state
+            icon="clock"
+            title="Sin asistencias recientes"
+            message="Cuando se registre una entrada aparecerá aquí."
+          />
+        } @else {
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of data.asistencias_recientes; track item.id) {
+                  <tr>
+                    <td>
+                      <div class="cell-title">
+                        <div>
+                          <strong>{{ item.cliente_detalle.nombre }}</strong>
+                          <span>{{ humanize(item.metodo_entrada) }}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{{ formatDateTime(item.entrada_at) }}</td>
+                    <td>{{ item.salida_at ? formatDateTime(item.salida_at) : '—' }}</td>
+                    <td>
+                      <app-status-badge
+                        [label]="item.salida_at ? 'Completada' : 'En curso'"
+                        [tone]="attendanceTone(item.salida_at)"
+                      />
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
+
+      <section class="card">
+        <header class="card__header">
+          <div>
+            <h2>Notificaciones</h2>
+            <p>Mensajes recientes de tu cuenta.</p>
+          </div>
+          @if (auth.hasPermission('notificaciones:view')) {
+            <a class="link-button" routerLink="/notificaciones">Ver todas</a>
+          }
+        </header>
+
+        @if (data.notificaciones_recientes.length === 0) {
+          <app-empty-state
+            icon="bell"
+            title="Todo al día"
+            message="No hay notificaciones recientes."
+          />
+        } @else {
+          <ul class="notification-list">
+            @for (item of data.notificaciones_recientes; track item.id) {
+              <li>
+                <span class="notification-list__icon"><app-icon name="bell" [size]="16" /></span>
+                <div>
+                  <strong>{{ item.titulo }}</strong>
+                  <p>{{ item.mensaje }}</p>
+                  <span class="subtle">{{ relativeDate(item.created_at) }}</span>
+                </div>
+                <app-status-badge
+                  [label]="notificationLabel(item.estado)"
+                  [tone]="notificationTone(item.estado)"
+                />
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    </div>
+
+    @if (data.actividad_reciente.length > 0) {
+      <section class="card">
+        <header class="card__header">
+          <div>
+            <h2>Actividad del sistema</h2>
+            <p>Últimos eventos auditados por el panel.</p>
+          </div>
+          @if (auth.isAdmin()) {
+            <a class="link-button" routerLink="/auditoria">Ver auditoría</a>
+          }
+        </header>
+        <ul class="activity-list">
+          @for (event of data.actividad_reciente; track event.id) {
+            <li>
+              <span class="activity-list__dot"></span>
+              <div>
+                <strong>{{ humanize(event.accion) }} · {{ humanize(event.recurso) }}</strong>
+                <p>
+                  {{ event.actor_nombre ?? 'Sistema' }}
+                  @if (event.objeto_id) {
+                    <span class="muted"> · #{{ event.objeto_id }}</span>
+                  }
+                </p>
+              </div>
+              <time class="subtle">{{ relativeDate(event.created_at) }}</time>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+    }
+  }
+</div>

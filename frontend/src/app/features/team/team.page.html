@@ -1,0 +1,233 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Personas"
+    title="Equipo"
+    subtitle="Perfiles del equipo de entrenamiento, terapia, recepción y administración."
+  >
+    @if (canCreate()) {
+      <a class="button button--primary" routerLink="/usuarios">
+        <app-icon name="user-plus" [size]="17" />
+        Nuevo miembro
+      </a>
+    }
+  </app-page-header>
+
+  <div class="tabs" role="tablist" aria-label="Tipo de perfil">
+    @for (kind of kinds(); track kind.kind) {
+      <button
+        class="tab"
+        type="button"
+        role="tab"
+        [class.active]="activeKind() === kind.kind"
+        [attr.aria-selected]="activeKind() === kind.kind"
+        (click)="selectKind(kind.kind)"
+      >
+        <app-icon [name]="kind.icon" [size]="16" />
+        {{ kind.label }}
+      </button>
+    }
+  </div>
+
+  @if (kinds().length === 0) {
+    <section class="card">
+      <app-empty-state
+        icon="shield"
+        title="Sin acceso al equipo"
+        message="Tu rol no tiene permisos para consultar perfiles del equipo."
+      />
+    </section>
+  } @else {
+    @if (activeConfig(); as config) {
+    <section class="card">
+      <header class="team-head">
+        <div>
+          <h2>{{ config.label }}</h2>
+          <p>{{ config.description }}</p>
+        </div>
+        <div class="team-head__tools">
+          <div class="search-box">
+            <app-icon name="search" [size]="16" />
+            <input
+              type="search"
+              placeholder="Buscar por nombre o correo"
+              [value]="search()"
+              (input)="updateSearch($any($event.target).value)"
+            />
+          </div>
+          <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+            <app-icon name="refresh" [size]="17" />
+          </button>
+        </div>
+      </header>
+
+      @if (error()) {
+        <div class="notice notice--error" role="alert">
+          <app-icon name="alert" [size]="18" />
+          <span>{{ error() }}</span>
+          <button class="link-button" type="button" (click)="load()">Reintentar</button>
+        </div>
+      }
+
+      @if (loading()) {
+        <div class="loading-state"><span class="spinner"></span><span>Cargando perfiles...</span></div>
+      } @else if (filtered().length === 0) {
+        <app-empty-state
+          icon="users"
+          title="Sin perfiles"
+          message="No se encontraron miembros para esta categoría."
+        >
+          @if (canCreate()) {
+            <a class="button button--primary button--sm" routerLink="/usuarios">
+              Crear desde Usuarios
+            </a>
+          }
+        </app-empty-state>
+      } @else {
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Miembro</th>
+                <th>Detalle profesional</th>
+                <th>Ingreso</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (profile of filtered(); track profile.usuario) {
+                <tr>
+                  <td>
+                    <div class="cell-title">
+                      <app-avatar [name]="profile.usuario_detalle.nombre" [size]="38" />
+                      <div>
+                        <strong>{{ profile.usuario_detalle.nombre }}</strong>
+                        <span>{{ profile.usuario_detalle.correo }}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <strong class="professional">{{ secondary(profile) }}</strong>
+                    @if (activeKind() === 'entrenadores' && profile.certificacion) {
+                      <span class="subtle">{{ profile.certificacion }}</span>
+                    }
+                    @if (activeKind() === 'terapeutas' && profile.licencia_profesional) {
+                      <span class="subtle">{{ profile.licencia_profesional }}</span>
+                    }
+                  </td>
+                  <td>{{ formatDate(profile.fecha_ingreso) }}</td>
+                  <td>
+                    <app-status-badge
+                      [label]="profile.is_active ? 'Activo' : 'Inactivo'"
+                      [tone]="profile.is_active ? 'success' : 'neutral'"
+                    />
+                  </td>
+                  <td>
+                    <div class="row-actions">
+                      @if (editPermission()) {
+                        <button class="icon-button" type="button" (click)="openEdit(profile)" aria-label="Editar perfil">
+                          <app-icon name="edit" [size]="16" />
+                        </button>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+    }
+  }
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="'Editar ' + (activeConfig()?.singular ?? 'perfil')"
+  subtitle="La identidad y los accesos se administran desde Usuarios."
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      @if (activeKind() === 'entrenadores') {
+        <div class="field">
+          <label for="team-especialidad">Especialidad</label>
+          <input id="team-especialidad" formControlName="especialidad" />
+        </div>
+        <div class="field">
+          <label for="team-certificacion">Certificación</label>
+          <input id="team-certificacion" formControlName="certificacion" />
+        </div>
+        <div class="field field--full">
+          <label for="team-bio">Biografía</label>
+          <textarea id="team-bio" formControlName="biografia" rows="3"></textarea>
+        </div>
+      }
+
+      @if (activeKind() === 'terapeutas') {
+        <div class="field">
+          <label for="team-especialidad-t">Especialidad</label>
+          <input id="team-especialidad-t" formControlName="especialidad" />
+        </div>
+        <div class="field">
+          <label for="team-licencia">Licencia profesional</label>
+          <input id="team-licencia" formControlName="licencia_profesional" />
+        </div>
+      }
+
+      @if (activeKind() === 'recepcionistas') {
+        <div class="field">
+          <label for="team-turno">Turno preferido</label>
+          <select id="team-turno" formControlName="turno_preferido">
+            <option value="">Sin especificar</option>
+            <option value="mañana">Mañana</option>
+            <option value="tarde">Tarde</option>
+            <option value="noche">Noche</option>
+          </select>
+        </div>
+      }
+
+      @if (activeKind() === 'administradores') {
+        <div class="field">
+          <label for="team-cargo">Cargo</label>
+          <input id="team-cargo" formControlName="cargo" />
+        </div>
+        <div class="field">
+          <label for="team-nivel">Nivel de permisos</label>
+          <select id="team-nivel" formControlName="nivel_permisos">
+            <option value="operativo">Operativo</option>
+            <option value="gestion">Gestión</option>
+            <option value="total">Total</option>
+          </select>
+        </div>
+      }
+
+      <div class="field">
+        <label for="team-ingreso">Fecha de ingreso</label>
+        <input id="team-ingreso" type="date" formControlName="fecha_ingreso" />
+      </div>
+
+      <label class="check-field">
+        <input type="checkbox" formControlName="is_active" />
+        <span>Perfil activo</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : 'Guardar cambios' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

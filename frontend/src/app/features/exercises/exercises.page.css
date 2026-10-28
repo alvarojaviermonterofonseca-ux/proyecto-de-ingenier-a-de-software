@@ -1,0 +1,90 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.filters select {
+  width: auto;
+  min-width: 11rem;
+}
+
+.exercise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.8rem;
+}
+
+.exercise-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.95rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.8rem;
+  background: var(--gc-surface-2);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.exercise-card:hover {
+  border-color: var(--gc-border-strong);
+  box-shadow: var(--gc-shadow-sm);
+}
+
+.exercise-card__icon {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  flex: none;
+  border-radius: 0.65rem;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.exercise-card__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.exercise-card__title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.exercise-card h2 {
+  margin: 0 0 0.3rem;
+  font-size: 0.91rem;
+  letter-spacing: -0.01em;
+}
+
+.exercise-card p {
+  display: -webkit-box;
+  margin: 0 0 0.5rem;
+  overflow: hidden;
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.exercise-card__actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.exercise-card__actions .icon-button {
+  width: 2rem;
+  height: 2rem;
+}
+
+@media (max-width: 640px) {
+  .filters select {
+    width: 100%;
+  }
+}

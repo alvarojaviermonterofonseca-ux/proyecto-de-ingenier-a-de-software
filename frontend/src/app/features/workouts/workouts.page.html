@@ -1,0 +1,167 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Operación"
+    title="Entrenamientos"
+    subtitle="Sesiones realizadas por los clientes y el entrenador que las acompañó."
+  >
+    @if (auth.hasPermission('entrenamientos:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nuevo entrenamiento
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar cliente o entrenador"
+          [value]="search()"
+          (input)="updateSearch($any($event.target).value)"
+        />
+      </div>
+      <select aria-label="Filtrar por estado" [value]="statusFilter()" (change)="statusFilter.set($any($event.target).value)">
+        <option value="">Todas las sesiones</option>
+        <option value="open">En curso</option>
+        <option value="closed">Finalizadas</option>
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando entrenamientos...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="calendar"
+        title="Sin entrenamientos"
+        message="No hay sesiones que coincidan con los filtros seleccionados."
+      />
+    } @else {
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Entrenador</th>
+              <th>Inicio</th>
+              <th>Fin</th>
+              <th>Duración</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (workout of filtered(); track workout.id) {
+              <tr>
+                <td>
+                  <div class="cell-title">
+                    <app-avatar [name]="workout.cliente_detalle.nombre" [size]="34" />
+                    <div>
+                      <strong>{{ workout.cliente_detalle.nombre }}</strong>
+                      <span>{{ workout.cliente_detalle.correo }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>{{ workout.entrenador_detalle?.nombre ?? 'Sin asignar' }}</td>
+                <td>{{ formatDateTime(workout.inicio_at) }}</td>
+                <td>{{ workout.fin_at ? formatDateTime(workout.fin_at) : '—' }}</td>
+                <td>{{ workout.duracion_minutos ? workout.duracion_minutos + ' min' : '—' }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="workout.fin_at ? 'Finalizada' : 'En curso'"
+                    [tone]="workout.fin_at ? 'success' : 'warning'"
+                  />
+                </td>
+                <td>
+                  <div class="row-actions">
+                    @if (auth.hasPermission('entrenamientos:edit')) {
+                      <button class="icon-button" type="button" (click)="openEdit(workout)" aria-label="Editar entrenamiento">
+                        <app-icon name="edit" [size]="16" />
+                      </button>
+                    }
+                    @if (auth.hasPermission('entrenamientos:delete')) {
+                      <button class="icon-button" type="button" (click)="remove(workout)" aria-label="Eliminar entrenamiento">
+                        <app-icon name="trash" [size]="16" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar entrenamiento' : 'Nuevo entrenamiento'"
+  subtitle="Registra el inicio, el cierre y las observaciones de la sesión."
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="workout-cliente">Cliente</label>
+        <select id="workout-cliente" formControlName="cliente">
+          <option [value]="0" disabled>Selecciona un cliente</option>
+          @for (client of clients(); track client.usuario) {
+            <option [value]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field field--full">
+        <label for="workout-entrenador">Entrenador</label>
+        <select id="workout-entrenador" formControlName="entrenador">
+          <option [value]="0">Sin entrenador asignado</option>
+          @for (trainer of trainers(); track trainer.usuario) {
+            <option [value]="trainer.usuario">{{ trainer.usuario_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="workout-inicio">Inicio</label>
+        <input id="workout-inicio" type="datetime-local" formControlName="inicio_at" />
+      </div>
+      <div class="field">
+        <label for="workout-fin">Fin</label>
+        <input id="workout-fin" type="datetime-local" formControlName="fin_at" />
+      </div>
+      <div class="field field--full">
+        <label for="workout-observaciones">Observaciones</label>
+        <textarea id="workout-observaciones" formControlName="observaciones" rows="3"></textarea>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear entrenamiento' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

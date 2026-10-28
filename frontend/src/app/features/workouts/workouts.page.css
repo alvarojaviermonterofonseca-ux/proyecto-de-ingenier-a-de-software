@@ -1,0 +1,18 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.filters select {
+  width: auto;
+  min-width: 10rem;
+}
+
+@media (max-width: 640px) {
+  .filters select {
+    width: 100%;
+  }
+}

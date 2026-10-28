@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>Gym Control Pro | Panel</title>
   <link rel="stylesheet" href="{% static 'panel.css' %}">
-  <script src="{% static 'panel.js' %}" defer></script>
+  <script type="module" src="{% static 'panel.js' %}"></script>
 </head>
 <body>
   <main class="page">
@@ -35,6 +35,18 @@
         <button id="logout-button" class="secondary-button" type="button">Cerrar sesión</button>
       </header>
 
+      <nav class="main-nav" aria-label="Secciones del panel">
+        <a href="#datos" data-route-link="datos">Datos</a>
+        <a href="#usuarios" data-route-link="usuarios" data-permission="usuarios:view">Usuarios</a>
+        <a href="#roles" data-route-link="roles" data-permission="roles:view">Roles y permisos</a>
+      </nav>
+      <p id="access-denied" class="access-denied" role="alert" hidden>
+        No tienes permiso para acceder a esta sección.
+        <a href="#datos">Volver a los datos</a>
+      </p>
+      <p id="rbac-notice" class="notice" role="status" hidden></p>
+
+      <section id="route-datos" class="route-view" data-route="datos">
       <section class="card data-card" aria-labelledby="resource-heading">
         <div class="toolbar">
           <label for="resource-select">Tabla</label>
@@ -47,6 +59,7 @@
             <option value="recepcionistas">Recepcionistas</option>
             <option value="administradores">Administradores</option>
             <option value="asignaciones-cliente-entrenador">Asignaciones cliente-entrenador</option>
+            <option value="clientes-terapeutas">Asignaciones cliente-terapeuta</option>
             <option value="asistencias">Asistencias</option>
             <option value="entrenamientos">Entrenamientos</option>
             <option value="ejercicios">Ejercicios</option>
@@ -60,6 +73,10 @@
           <button id="refresh-button" class="secondary-button" type="button">Actualizar</button>
         </div>
 
+        <div class="toolbar action-toolbar">
+          <button id="export-button" class="secondary-button" type="button">Exportar JSON</button>
+          <button id="create-user-shortcut" class="primary-button" type="button" data-permission="usuarios:create">Crear usuario</button>
+        </div>
         <div class="results-heading">
           <h2 id="resource-heading">Entrenadores</h2>
           <p id="resource-message" class="muted" role="status" aria-live="polite"></p>
@@ -69,6 +86,65 @@
           <button id="previous-button" class="secondary-button" type="button" disabled>Anterior</button>
           <button id="next-button" class="secondary-button" type="button" disabled>Siguiente</button>
         </nav>
+      </section>
+      </section>
+
+      <section id="route-usuarios" class="route-view" data-route="usuarios" hidden>
+        <section class="card data-card" aria-labelledby="users-heading">
+          <div class="results-heading">
+            <div>
+              <h2 id="users-heading">Gestión de usuarios</h2>
+              <p class="muted">Los cambios de datos y los roles se guardan en la base de datos.</p>
+            </div>
+            <button id="users-refresh" class="secondary-button" type="button">Actualizar</button>
+          </div>
+          <p id="users-message" class="muted" role="status" aria-live="polite"></p>
+          <form id="user-form" class="admin-form" data-permission="usuarios:create">
+            <h3>Crear usuario</h3>
+            <label for="new-user-name">Nombre</label>
+            <input id="new-user-name" name="nombre" maxlength="150" required>
+            <label for="new-user-email">Correo</label>
+            <input id="new-user-email" name="correo" type="email" required>
+            <label for="new-user-password">Contraseña temporal (mínimo 8 caracteres)</label>
+            <input id="new-user-password" name="contrasena" type="password" minlength="8" required>
+            <label for="new-user-primary-role">Rol principal</label>
+            <select id="new-user-primary-role" name="rol-principal" required></select>
+            <label for="new-user-roles">Roles adicionales</label>
+            <select id="new-user-roles" name="roles" multiple aria-describedby="role-assignment-help"></select>
+            <p id="role-assignment-help" class="muted">El rol principal y los adicionales se guardan en la base de datos.</p>
+            <button class="primary-button" type="submit">Crear usuario</button>
+          </form>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Usuario</th><th>Correo</th><th>Roles</th><th>Estado</th><th>Acción</th></tr></thead>
+              <tbody id="users-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="route-roles" class="route-view" data-route="roles" hidden>
+        <section class="card data-card" aria-labelledby="roles-heading">
+          <div class="results-heading">
+            <div>
+              <h2 id="roles-heading">Roles y permisos</h2>
+              <p class="muted">Selecciona las acciones habilitadas para cada rol. Los cambios se guardan en la base de datos.</p>
+            </div>
+            <button id="roles-refresh" class="secondary-button" type="button">Actualizar</button>
+          </div>
+          <p id="roles-message" class="muted" role="status" aria-live="polite"></p>
+          <form id="role-form" class="admin-form" data-permission="roles:edit">
+            <label for="role-select">Rol</label>
+            <select id="role-select" name="role"></select>
+            <label for="role-description">Descripción</label>
+            <input id="role-description" name="descripcion" maxlength="255">
+            <fieldset id="permission-fields">
+              <legend>Permisos por recurso y acción</legend>
+              <div id="permission-matrix" class="permission-matrix"></div>
+            </fieldset>
+            <button class="primary-button" type="submit">Guardar permisos</button>
+          </form>
+        </section>
       </section>
     </section>
   </main>

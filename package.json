@@ -1,0 +1,12 @@
+{
+  "name": "gym_control_pro",
+  "version": "1.0.0",
+  "description": "Backend REST construido con Django y Django REST Framework a partir de `gym_control_pro.sql`. Incluye identidad y perfiles, asignaciones cliente-entrenador y cliente-terapeuta, asistencia, entrenamiento, nutrición y notificaciones.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

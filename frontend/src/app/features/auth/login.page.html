@@ -1,0 +1,148 @@
+<main class="login">
+  <section class="login__story" aria-label="Gym Control Pro">
+    <div class="story__glow story__glow--one"></div>
+    <div class="story__glow story__glow--two"></div>
+
+    <a class="brand" routerLink="/login">
+      <span class="brand__mark"><app-icon name="dumbbell" [size]="25" /></span>
+      <span>
+        <strong>Gym Control</strong>
+        <small>Pro</small>
+      </span>
+    </a>
+
+    <div class="story__content">
+      <span class="story__tag">Operación conectada</span>
+      <h1>El pulso de tu gimnasio, <em>en un solo lugar.</em></h1>
+      <p>
+        Clientes, planes, asistencias y seguimiento nutricional con la claridad que
+        tu equipo necesita para acompañar cada objetivo.
+      </p>
+
+      <div class="story__stats">
+        <div>
+          <strong>360°</strong>
+          <span>Visión del cliente</span>
+        </div>
+        <div>
+          <strong>RBAC</strong>
+          <span>Accesos por rol</span>
+        </div>
+        <div>
+          <strong>24/7</strong>
+          <span>Control operativo</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="story__quote">
+      <app-icon name="sparkles" [size]="19" />
+      <p>“Decisiones claras, equipos alineados y clientes mejor acompañados.”</p>
+    </div>
+  </section>
+
+  <section class="login__panel">
+    <a class="brand brand--mobile" routerLink="/login">
+      <span class="brand__mark"><app-icon name="dumbbell" [size]="22" /></span>
+      <span>
+        <strong>Gym Control</strong>
+        <small>Pro</small>
+      </span>
+    </a>
+
+    <button
+      class="icon-button theme-toggle"
+      type="button"
+      (click)="theme.toggle()"
+      [attr.aria-label]="theme.theme() === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'"
+    >
+      <app-icon [name]="theme.theme() === 'dark' ? 'sun' : 'moon'" [size]="18" />
+    </button>
+
+    <div class="login__box fade-in">
+      <div class="login__heading">
+        <span class="eyebrow">Acceso al panel</span>
+        <h2>Hola de nuevo</h2>
+        <p>Ingresa con la cuenta que te asignó tu administrador.</p>
+      </div>
+
+      @if (expired()) {
+        <div class="notice notice--warning" role="status">
+          <app-icon name="clock" [size]="18" />
+          <span>Tu sesión expiró. Inicia sesión para continuar.</span>
+        </div>
+      }
+
+      @if (error()) {
+        <div class="notice notice--error" role="alert">
+          <app-icon name="alert" [size]="18" />
+          <span>{{ error() }}</span>
+        </div>
+      }
+
+      <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+        <div class="field">
+          <label for="correo">Correo electrónico</label>
+          <div class="input-shell">
+            <app-icon name="mail" [size]="18" />
+            <input
+              id="correo"
+              type="email"
+              formControlName="correo"
+              autocomplete="email"
+              placeholder="nombre@correo.com"
+              [attr.aria-invalid]="form.controls.correo.touched && form.controls.correo.invalid"
+            />
+          </div>
+          @if (form.controls.correo.touched && form.controls.correo.hasError('required')) {
+            <p class="field-error">Ingresa tu correo.</p>
+          } @else if (form.controls.correo.touched && form.controls.correo.hasError('email')) {
+            <p class="field-error">Ingresa un correo válido.</p>
+          }
+        </div>
+
+        <div class="field">
+          <label for="contrasena">Contraseña</label>
+          <div class="input-shell">
+            <app-icon name="lock" [size]="18" />
+            <input
+              id="contrasena"
+              [type]="showPassword() ? 'text' : 'password'"
+              formControlName="contrasena"
+              autocomplete="current-password"
+              placeholder="Tu contraseña"
+              [attr.aria-invalid]="form.controls.contrasena.touched && form.controls.contrasena.invalid"
+            />
+            <button
+              class="password-toggle"
+              type="button"
+              (click)="togglePassword()"
+              [attr.aria-label]="showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+            >
+              <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" [size]="18" />
+            </button>
+          </div>
+          @if (form.controls.contrasena.touched && form.controls.contrasena.hasError('required')) {
+            <p class="field-error">Ingresa tu contraseña.</p>
+          }
+        </div>
+
+        <button class="button button--primary submit" type="submit" [disabled]="loading()">
+          @if (loading()) {
+            <span class="spinner spinner--small"></span>
+            Verificando...
+          } @else {
+            Entrar al panel
+            <app-icon name="arrow-right" [size]="18" />
+          }
+        </button>
+      </form>
+
+      <p class="login__support">
+        ¿Olvidaste tu contraseña? Contacta al administrador del gimnasio.
+      </p>
+    </div>
+
+    <p class="login__footer">Gym Control Pro · Gestión integral del gimnasio</p>
+  </section>
+</main>

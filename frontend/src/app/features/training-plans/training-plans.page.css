@@ -1,0 +1,148 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 0.9rem;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem;
+  border: 1px solid var(--gc-border);
+  border-radius: var(--gc-radius);
+  background: var(--gc-surface-2);
+}
+
+.plan-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.plan-card__client {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.6rem;
+}
+
+.plan-card__client strong,
+.plan-card__client span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-card__client strong {
+  font-size: 0.92rem;
+}
+
+.plan-card__client span {
+  color: var(--gc-muted);
+  font-size: 0.76rem;
+}
+
+.plan-card__objective {
+  margin: 0.8rem 0;
+  color: var(--gc-ink-soft);
+  font-size: 0.84rem;
+}
+
+.plan-card .detail-list {
+  margin-bottom: 0.9rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--gc-border);
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.plan-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.check-field {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 0.5rem;
+  min-height: 2.55rem;
+  color: var(--gc-ink-soft);
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.exercise-plan-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 1.3rem;
+}
+
+.exercise-plan-list article {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.65rem;
+  background: var(--gc-surface-2);
+}
+
+.exercise-plan-list__order {
+  display: grid;
+  width: 1.8rem;
+  height: 1.8rem;
+  place-items: center;
+  flex: none;
+  border-radius: 0.5rem;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.exercise-plan-list article > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.exercise-plan-list strong {
+  display: block;
+  font-size: 0.84rem;
+}
+
+.exercise-plan-list p {
+  margin: 0.1rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.75rem;
+}
+
+.exercise-plan-list small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--gc-muted);
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
+.add-exercise {
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.add-exercise h3 {
+  margin: 0 0 0.8rem;
+  font-size: 0.95rem;
+}

@@ -1,0 +1,121 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.filter-select {
+  width: auto;
+  min-width: 10.5rem;
+  max-width: 100%;
+}
+
+.notification-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.75rem;
+  background: var(--gc-surface-2);
+  transition: border-color 160ms ease;
+}
+
+.notification-item:hover {
+  border-color: var(--gc-border-strong);
+}
+
+.notification-item__icon {
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
+  flex: none;
+  place-items: center;
+  border-radius: 0.6rem;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.notification-item__icon--enviada {
+  color: #18815a;
+  background: #e4f7ed;
+}
+
+.notification-item__icon--fallida {
+  color: #b42318;
+  background: #fde8e6;
+}
+
+.notification-item__icon--cancelada {
+  color: var(--gc-muted);
+  background: var(--gc-surface-3);
+}
+
+.notification-item__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.notification-item__body header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.notification-item__body header > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.notification-item__body strong {
+  font-size: 0.87rem;
+}
+
+.notification-item__body p {
+  margin: 0.35rem 0 0;
+  color: var(--gc-ink-soft);
+  font-size: 0.81rem;
+  line-height: 1.45;
+}
+
+.notification-item__body footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin-top: 0.55rem;
+  color: var(--gc-muted);
+  font-size: 0.71rem;
+}
+
+.recipient {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--gc-ink-soft);
+  font-weight: 650;
+}
+
+.notification-item .row-actions {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .notification-item {
+    flex-wrap: wrap;
+  }
+
+  .notification-item .row-actions {
+    margin-left: auto;
+  }
+}

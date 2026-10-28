@@ -1,0 +1,111 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 0.9rem;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem;
+  border: 1px solid var(--gc-border);
+  border-radius: var(--gc-radius);
+  background: var(--gc-surface-2);
+}
+
+.plan-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.plan-card__client {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.6rem;
+}
+
+.plan-card__client strong,
+.plan-card__client span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-card__client strong {
+  font-size: 0.92rem;
+}
+
+.plan-card__client span {
+  color: var(--gc-muted);
+  font-size: 0.76rem;
+}
+
+.plan-card__objective {
+  margin: 0.8rem 0;
+  color: var(--gc-ink-soft);
+  font-size: 0.84rem;
+}
+
+.calories {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.8rem;
+  padding: 0.65rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.6rem;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.calories strong,
+.calories span {
+  display: block;
+}
+
+.calories strong {
+  font-size: 0.88rem;
+}
+
+.calories span {
+  color: var(--gc-muted);
+  font-size: 0.7rem;
+}
+
+.plan-card .detail-list {
+  margin-bottom: 0.9rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--gc-border);
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.plan-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.check-field {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 0.5rem;
+  min-height: 2.55rem;
+  color: var(--gc-ink-soft);
+  font-size: 0.85rem;
+  font-weight: 650;
+}

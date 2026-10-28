@@ -1,0 +1,363 @@
+@if (auth.user(); as user) {
+  <div class="fade-in">
+    <app-page-header
+      eyebrow="Cuenta"
+      title="Mi perfil"
+      subtitle="Tu identidad, roles y datos profesionales dentro de Gym Control Pro."
+    />
+
+    <section class="profile-hero card">
+      <app-avatar [name]="user.nombre" [size]="72" />
+      <div class="profile-hero__identity">
+        <div class="profile-hero__name">
+          <h2>{{ user.nombre }}</h2>
+          <app-status-badge
+            [label]="user.is_active ? 'Cuenta activa' : 'Cuenta inactiva'"
+            [tone]="user.is_active ? 'success' : 'danger'"
+          />
+        </div>
+        <p>{{ user.correo }}</p>
+        <div class="profile-hero__roles">
+          @for (role of user.roles_efectivos; track role.id) {
+            <span class="tag">{{ role.nombre }}</span>
+          }
+        </div>
+      </div>
+      <div class="profile-hero__actions">
+        @if (canEditIdentity()) {
+          <button class="button button--secondary" type="button" (click)="openIdentity()">
+            <app-icon name="edit" [size]="16" />
+            Editar datos
+          </button>
+        }
+        @if (canEditIdentity()) {
+          <button class="button button--ghost" type="button" (click)="openPassword()">
+            <app-icon name="lock" [size]="16" />
+            Cambiar contraseña
+          </button>
+        }
+      </div>
+    </section>
+
+    <div class="profile-grid">
+      <section class="card">
+        <header class="section-header">
+          <h3>Información de contacto</h3>
+        </header>
+        <dl class="detail-list detail-list--stacked">
+          <div>
+            <dt>Nombre</dt>
+            <dd>{{ user.nombre }}</dd>
+          </div>
+          <div>
+            <dt>Correo</dt>
+            <dd>{{ user.correo }}</dd>
+          </div>
+          <div>
+            <dt>Usuario</dt>
+            <dd>{{ user.username ?? '—' }}</dd>
+          </div>
+          <div>
+            <dt>Teléfono</dt>
+            <dd>{{ user.telefono ?? '—' }}</dd>
+          </div>
+          <div>
+            <dt>Rol principal</dt>
+            <dd><span class="tag">{{ user.rol_detalle.nombre }}</span></dd>
+          </div>
+        </dl>
+        @if (!canEditIdentity()) {
+          <p class="hint">
+            <app-icon name="lock" [size]="14" />
+            La edición de la cuenta está reservada al personal autorizado.
+          </p>
+        }
+      </section>
+
+      <section class="card">
+        <header class="section-header">
+          <h3>
+            @switch (roleName()) {
+              @case ('cliente') { Perfil de cliente }
+              @case ('entrenador') { Perfil de entrenador }
+              @case ('terapeuta') { Perfil de terapeuta }
+              @case ('recepcionista') { Perfil de recepción }
+              @case ('administrador') { Perfil administrativo }
+              @default { Perfil }
+            }
+          </h3>
+          @if (profile() && canEditProfile()) {
+            <button class="link-button" type="button" (click)="openProfile()">
+              <app-icon name="edit" [size]="14" />
+              Editar
+            </button>
+          }
+        </header>
+
+        @if (loadingProfile()) {
+          <div class="loading-state"><span class="spinner"></span><span>Cargando perfil...</span></div>
+        } @else if (profile() && details().length > 0) {
+          <dl class="detail-list detail-list--stacked">
+            @for (detail of details(); track detail.label) {
+              <div>
+                <dt>{{ detail.label }}</dt>
+                <dd>{{ detail.value }}</dd>
+              </div>
+            }
+          </dl>
+          @if (!canEditProfile()) {
+            <p class="hint">
+              <app-icon name="lock" [size]="14" />
+              Contacta a un administrador para actualizar estos datos.
+            </p>
+          }
+        } @else {
+          <p class="hint">Tu rol no tiene un perfil ampliado asociado.</p>
+        }
+      </section>
+
+      <section class="card profile-grid__wide">
+        <header class="section-header">
+          <h3>Roles y permisos efectivos</h3>
+          <span class="tag">{{ permissionList().length }} permisos</span>
+        </header>
+        <div class="role-list">
+          @for (role of user.roles_efectivos; track role.id) {
+            <div class="role-item">
+              <app-icon name="shield" [size]="16" />
+              <div>
+                <strong>{{ role.nombre }}</strong>
+                <span>{{ role.descripcion ?? 'Rol asignado' }}</span>
+              </div>
+            </div>
+          }
+        </div>
+        <div class="permission-cloud">
+          @for (permission of permissionList(); track permission) {
+            <span class="permission-chip">{{ permission }}</span>
+          }
+        </div>
+      </section>
+
+      <section class="card profile-grid__wide">
+        <header class="section-header">
+          <h3>Sesión</h3>
+        </header>
+        <div class="session-row">
+          <div>
+            <strong>Sesión actual protegida por token Bearer</strong>
+            <p>El token se guarda solo en esta pestaña y expira automáticamente.</p>
+          </div>
+          <button class="button button--danger" type="button" (click)="logoutEverywhere()">
+            <app-icon name="logout" [size]="16" />
+            Cerrar todas las sesiones
+          </button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <app-modal
+    [open]="identityOpen()"
+    title="Editar datos personales"
+    subtitle="Actualiza tu identidad de acceso."
+    (closed)="closeIdentity()"
+  >
+    @if (formError()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ formError() }}</span>
+      </div>
+    }
+    <form [formGroup]="identityForm" (ngSubmit)="saveIdentity()" novalidate>
+      <div class="form-grid">
+        <div class="field field--full">
+          <label for="identity-name">Nombre</label>
+          <input id="identity-name" formControlName="nombre" />
+        </div>
+        <div class="field">
+          <label for="identity-email">Correo</label>
+          <input id="identity-email" type="email" formControlName="correo" />
+        </div>
+        <div class="field">
+          <label for="identity-phone">Teléfono</label>
+          <input id="identity-phone" formControlName="telefono" />
+        </div>
+        <div class="field field--full">
+          <label for="identity-username">Nombre de usuario</label>
+          <input id="identity-username" formControlName="username" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="button button--secondary" type="button" (click)="closeIdentity()" [disabled]="saving()">
+          Cancelar
+        </button>
+        <button class="button button--primary" type="submit" [disabled]="saving()">
+          {{ saving() ? 'Guardando...' : 'Guardar datos' }}
+        </button>
+      </div>
+    </form>
+  </app-modal>
+
+  <app-modal
+    [open]="passwordOpen()"
+    title="Cambiar contraseña"
+    subtitle="Al cambiarla se cerrarán todas tus sesiones activas."
+    (closed)="closePassword()"
+  >
+    @if (formError()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ formError() }}</span>
+      </div>
+    }
+    <form [formGroup]="passwordForm" (ngSubmit)="savePassword()" novalidate>
+      <div class="form-grid">
+        <div class="field field--full">
+          <label for="password-new">Nueva contraseña</label>
+          <input id="password-new" type="password" formControlName="contrasena" autocomplete="new-password" />
+          <small>Mínimo 8 caracteres; evita datos personales o claves comunes.</small>
+        </div>
+        <div class="field field--full">
+          <label for="password-confirm">Confirmar contraseña</label>
+          <input id="password-confirm" type="password" formControlName="confirmacion" autocomplete="new-password" />
+          @if (passwordForm.hasError('mismatch') && passwordForm.controls.confirmacion.touched) {
+            <small class="field-error">Las contraseñas no coinciden.</small>
+          }
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="button button--secondary" type="button" (click)="closePassword()" [disabled]="saving()">
+          Cancelar
+        </button>
+        <button class="button button--primary" type="submit" [disabled]="saving()">
+          {{ saving() ? 'Actualizando...' : 'Actualizar contraseña' }}
+        </button>
+      </div>
+    </form>
+  </app-modal>
+
+  <app-modal
+    [open]="profileOpen()"
+    [title]="'Editar perfil · ' + (roleName() ?? '')"
+    subtitle="Estos datos son visibles para el equipo autorizado."
+    size="wide"
+    (closed)="closeProfile()"
+  >
+    @if (formError()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ formError() }}</span>
+      </div>
+    }
+    <form [formGroup]="profileForm" (ngSubmit)="saveProfile()" novalidate>
+      @switch (roleName()) {
+        @case ('cliente') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="profile-doc-type">Tipo de documento</label>
+              <input id="profile-doc-type" formControlName="tipo_documento" placeholder="CC, CE, PAS..." />
+            </div>
+            <div class="field">
+              <label for="profile-doc-number">Número de documento</label>
+              <input id="profile-doc-number" formControlName="numero_documento" />
+            </div>
+            <div class="field">
+              <label for="profile-birth">Fecha de nacimiento</label>
+              <input id="profile-birth" type="date" formControlName="fecha_nacimiento" />
+            </div>
+            <div class="field">
+              <label for="profile-goal">Objetivo</label>
+              <input id="profile-goal" formControlName="objetivo" />
+            </div>
+            <div class="field">
+              <label for="profile-weight">Peso (kg)</label>
+              <input id="profile-weight" type="number" step="0.01" min="0" formControlName="peso_kg" />
+            </div>
+            <div class="field">
+              <label for="profile-height">Estatura (cm)</label>
+              <input id="profile-height" type="number" step="0.01" min="0" formControlName="estatura_cm" />
+            </div>
+          </div>
+        }
+        @case ('entrenador') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="profile-specialty">Especialidad</label>
+              <input id="profile-specialty" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="profile-certification">Certificación</label>
+              <input id="profile-certification" formControlName="certificacion" />
+            </div>
+            <div class="field">
+              <label for="profile-start">Fecha de ingreso</label>
+              <input id="profile-start" type="date" formControlName="fecha_ingreso" />
+            </div>
+            <div class="field field--full">
+              <label for="profile-bio">Biografía</label>
+              <textarea id="profile-bio" formControlName="biografia" rows="3"></textarea>
+            </div>
+          </div>
+        }
+        @case ('terapeuta') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="profile-specialty">Especialidad</label>
+              <input id="profile-specialty" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="profile-license">Licencia profesional</label>
+              <input id="profile-license" formControlName="licencia_profesional" />
+            </div>
+            <div class="field">
+              <label for="profile-start">Fecha de ingreso</label>
+              <input id="profile-start" type="date" formControlName="fecha_ingreso" />
+            </div>
+          </div>
+        }
+        @case ('recepcionista') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="profile-shift">Turno preferido</label>
+              <input id="profile-shift" formControlName="turno_preferido" placeholder="Mañana, tarde, noche..." />
+            </div>
+            <div class="field">
+              <label for="profile-start">Fecha de ingreso</label>
+              <input id="profile-start" type="date" formControlName="fecha_ingreso" />
+            </div>
+          </div>
+        }
+        @case ('administrador') {
+          <div class="form-grid">
+            <div class="field">
+              <label for="profile-position">Cargo</label>
+              <input id="profile-position" formControlName="cargo" />
+            </div>
+            <div class="field">
+              <label for="profile-level">Nivel de permisos</label>
+              <select id="profile-level" formControlName="nivel_permisos">
+                @for (level of adminLevels | keyvalue; track level.key) {
+                  <option [value]="level.key">{{ level.value }}</option>
+                }
+              </select>
+            </div>
+            <div class="field">
+              <label for="profile-start">Fecha de ingreso</label>
+              <input id="profile-start" type="date" formControlName="fecha_ingreso" />
+            </div>
+          </div>
+        }
+      }
+
+      <div class="form-actions">
+        <button class="button button--secondary" type="button" (click)="closeProfile()" [disabled]="saving()">
+          Cancelar
+        </button>
+        <button class="button button--primary" type="submit" [disabled]="saving()">
+          {{ saving() ? 'Guardando...' : 'Guardar perfil' }}
+        </button>
+      </div>
+    </form>
+  </app-modal>
+}

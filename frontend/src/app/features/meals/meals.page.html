@@ -1,0 +1,166 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Nutrición"
+    title="Comidas"
+    subtitle="Estructura las comidas de cada plan de alimentación."
+  >
+    @if (auth.hasPermission('comidas:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nueva comida
+      </button>
+    }
+  </app-page-header>
+
+  @if (selectedPlan(); as plan) {
+    <div class="context-bar">
+      <app-icon name="salad" [size]="18" />
+      <div>
+        <strong>{{ plan.nombre }}</strong>
+        <span>{{ plan.cliente_detalle.nombre }} · {{ plan.objetivo }}</span>
+      </div>
+      @if (auth.hasPermission('planes-alimentacion:view')) {
+        <a class="link-button" routerLink="/planes-alimentacion">Ver todos los planes</a>
+      }
+    </div>
+  }
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar comida"
+          [value]="search()"
+          (input)="search.set($any($event.target).value)"
+        />
+      </div>
+      <select class="filter-select" [value]="planFilter() ?? ''" (change)="selectPlan($any($event.target).value)">
+        <option value="">Todos los planes</option>
+        @for (plan of plans(); track plan.id) {
+          <option [value]="plan.id">{{ plan.nombre }} · {{ plan.cliente_detalle.nombre }}</option>
+        }
+      </select>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando comidas...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="apple"
+        title="Sin comidas"
+        message="Agrega comidas al plan para definir la distribución diaria."
+      />
+    } @else {
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Comida</th>
+              <th>Tipo</th>
+              <th>Hora</th>
+              <th>Plan</th>
+              <th class="table-actions">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (meal of filtered(); track meal.id) {
+              <tr>
+                <td>
+                  <strong>{{ meal.nombre }}</strong>
+                  @if (meal.descripcion) {
+                    <span class="cell-sub">{{ meal.descripcion }}</span>
+                  }
+                </td>
+                <td><span class="tag">{{ typeLabel(meal.tipo) }}</span></td>
+                <td>{{ meal.hora_sugerida ? formatTime(meal.hora_sugerida) : '—' }}</td>
+                <td class="cell-sub">{{ planName(meal.plan_alimentacion) }}</td>
+                <td class="table-actions">
+                  @if (auth.hasPermission('comidas:edit')) {
+                    <button class="icon-button" type="button" (click)="openEdit(meal)" aria-label="Editar comida">
+                      <app-icon name="edit" [size]="16" />
+                    </button>
+                  }
+                  @if (auth.hasPermission('comidas:delete')) {
+                    <button class="icon-button" type="button" (click)="remove(meal)" aria-label="Eliminar comida">
+                      <app-icon name="trash" [size]="16" />
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar comida' : 'Nueva comida'"
+  subtitle="Asocia la comida a un plan existente."
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="meal-plan">Plan de alimentación</label>
+        <select id="meal-plan" formControlName="plan_alimentacion">
+          <option [value]="0" disabled>Selecciona un plan</option>
+          @for (plan of plans(); track plan.id) {
+            <option [value]="plan.id">{{ plan.nombre }} · {{ plan.cliente_detalle.nombre }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="meal-name">Nombre</label>
+        <input id="meal-name" formControlName="nombre" placeholder="Ej. Avena con fruta" />
+      </div>
+      <div class="field">
+        <label for="meal-type">Tipo</label>
+        <select id="meal-type" formControlName="tipo">
+          @for (type of mealTypes | keyvalue; track type.key) {
+            <option [value]="type.key">{{ type.value }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="meal-time">Hora sugerida</label>
+        <input id="meal-time" type="time" formControlName="hora_sugerida" />
+      </div>
+      <div class="field field--full">
+        <label for="meal-description">Descripción</label>
+        <textarea id="meal-description" formControlName="descripcion" rows="3"></textarea>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Agregar comida' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

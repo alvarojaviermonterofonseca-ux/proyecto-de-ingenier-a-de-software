@@ -1,0 +1,244 @@
+<div class="fade-in">
+  <app-page-header
+    eyebrow="Nutrición"
+    title="Registros de comida"
+    subtitle="Seguimiento fotográfico de las comidas de cada cliente."
+  >
+    @if (auth.hasPermission('registros-comida:create')) {
+      <button class="button button--primary" type="button" (click)="openCreate()">
+        <app-icon name="plus" [size]="17" />
+        Nuevo registro
+      </button>
+    }
+  </app-page-header>
+
+  <section class="card">
+    <div class="filters">
+      <div class="search-box">
+        <app-icon name="search" [size]="17" />
+        <input
+          type="search"
+          placeholder="Buscar cliente, comida u observación"
+          [value]="search()"
+          (input)="search.set($any($event.target).value)"
+        />
+      </div>
+      <div class="segmented">
+        <button
+          type="button"
+          [class.is-active]="verification() === 'all'"
+          (click)="setVerification('all')"
+        >
+          Todos
+        </button>
+        <button
+          type="button"
+          [class.is-active]="verification() === 'pending'"
+          (click)="setVerification('pending')"
+        >
+          Pendientes
+        </button>
+        <button
+          type="button"
+          [class.is-active]="verification() === 'verified'"
+          (click)="setVerification('verified')"
+        >
+          Verificados
+        </button>
+      </div>
+      <button class="icon-button" type="button" (click)="load()" aria-label="Actualizar">
+        <app-icon name="refresh" [size]="17" />
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="notice notice--error" role="alert">
+        <app-icon name="alert" [size]="18" />
+        <span>{{ error() }}</span>
+        <button class="link-button" type="button" (click)="load()">Reintentar</button>
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-state"><span class="spinner"></span><span>Cargando registros...</span></div>
+    } @else if (filtered().length === 0) {
+      <app-empty-state
+        icon="camera"
+        title="Sin registros"
+        message="Los registros fotográficos de comidas aparecerán aquí."
+      />
+    } @else {
+      <div class="record-grid">
+        @for (record of filtered(); track record.id) {
+          <article class="record-card">
+            <div class="record-card__photo">
+              @if (photoFor(record.id); as photo) {
+                <a [href]="photo" target="_blank" rel="noopener" aria-label="Abrir foto">
+                  <img [src]="photo" alt="Foto del registro de comida" loading="lazy" />
+                </a>
+              } @else {
+                <div class="record-card__placeholder">
+                  <app-icon name="camera" [size]="24" />
+                  <span>Sin foto</span>
+                </div>
+              }
+            </div>
+            <div class="record-card__body">
+              <header>
+                <div class="record-card__client">
+                  <app-avatar [name]="record.cliente_detalle.nombre" [size]="34" />
+                  <div>
+                    <strong>{{ record.cliente_detalle.nombre }}</strong>
+                    <span>{{ record.comida_nombre ?? 'Registro libre' }}</span>
+                  </div>
+                </div>
+                <app-status-badge
+                  [label]="record.verificado ? 'Verificado' : 'Pendiente'"
+                  [tone]="record.verificado ? 'success' : 'warning'"
+                />
+              </header>
+              <p class="record-date">{{ formatDateTime(record.registrado_at) }}</p>
+              @if (record.observaciones) {
+                <p class="record-note">{{ record.observaciones }}</p>
+              }
+              <footer>
+                @if (record.calificacion) {
+                  <span class="rating">
+                    <app-icon name="sparkles" [size]="14" />
+                    {{ record.calificacion }} / 5
+                  </span>
+                } @else {
+                  <span class="record-sub">{{ record.revisado_por_detalle?.nombre ?? 'Sin revisar' }}</span>
+                }
+                <div class="row-actions">
+                  @if (auth.hasPermission('registros-comida:edit')) {
+                    <button class="icon-button" type="button" (click)="openEdit(record)" aria-label="Editar registro">
+                      <app-icon name="edit" [size]="16" />
+                    </button>
+                  }
+                  @if (auth.hasPermission('registros-comida:delete')) {
+                    <button class="icon-button" type="button" (click)="remove(record)" aria-label="Eliminar registro">
+                      <app-icon name="trash" [size]="16" />
+                    </button>
+                  }
+                </div>
+              </footer>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar registro' : 'Nuevo registro de comida'"
+  subtitle="La imagen se almacena de forma privada y solo se sirve con autenticación."
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="record-form">
+      <div class="form-grid">
+        <div class="field">
+          <label for="record-client">Cliente</label>
+          <select
+            id="record-client"
+            formControlName="cliente"
+            (change)="updateFormClient($any($event.target).value)"
+          >
+            <option [value]="0" disabled>Selecciona un cliente</option>
+            @for (client of clients(); track client.usuario) {
+              <option [value]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="record-meal">Comida del plan</label>
+          <select id="record-meal" formControlName="comida">
+            <option [value]="0">Sin comida asociada</option>
+            @for (meal of availableMeals(); track meal.id) {
+              <option [value]="meal.id">{{ meal.nombre }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="record-date">Fecha y hora</label>
+          <input id="record-date" type="datetime-local" formControlName="registrado_at" />
+        </div>
+        <div class="field">
+          <label for="record-photo">Foto</label>
+          <input
+            #photoInput
+            id="record-photo"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            (change)="onFileSelected($event)"
+          />
+          <small>JPG, PNG o WebP. Máximo 5 MB.</small>
+        </div>
+        <div class="field field--full">
+          <label for="record-observations">Observaciones</label>
+          <textarea id="record-observations" formControlName="observaciones" rows="3"></textarea>
+        </div>
+      </div>
+
+      <div class="photo-column">
+        <span class="photo-column__label">Vista previa</span>
+        @if (localPhotoPreview() ?? existingPhotoUrl(); as preview) {
+          <img class="photo-preview" [src]="preview" alt="Vista previa de la foto" />
+          @if (selectedPhoto()) {
+            <button class="link-button" type="button" (click)="clearPhoto(photoInput)">
+              Quitar selección
+            </button>
+          }
+        } @else {
+          <div class="photo-preview photo-preview--empty">
+            <app-icon name="camera" [size]="28" />
+            <span>Sin foto seleccionada</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    @if (canReview()) {
+      <div class="review-box">
+        <h3>Revisión del profesional</h3>
+        <div class="form-grid">
+          <label class="check-field">
+            <input type="checkbox" formControlName="verificado" />
+            <span>Registro verificado</span>
+          </label>
+          <div class="field">
+            <label for="record-rating">Calificación (0 a 5)</label>
+            <input
+              id="record-rating"
+              type="number"
+              min="0"
+              max="5"
+              step="0.5"
+              formControlName="calificacion"
+            />
+          </div>
+        </div>
+      </div>
+    }
+
+    <div class="form-actions">
+      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
+        Cancelar
+      </button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear registro' }}
+      </button>
+    </div>
+  </form>
+</app-modal>
