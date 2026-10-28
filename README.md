@@ -8,6 +8,8 @@ Requiere Python 3.12 o posterior.
 
 El código Django está en `backend/`, la SPA Angular y el panel legado en `frontend/`, el entorno virtual en `venv/` y las bases SQLite en `base de datos/`.
 
+Usa un único entorno virtual, `venv/`, en la raíz del repositorio. Está excluido de Git junto con `.venv/`, `env/` y `base de datos/`, así que no hace falta versionarlo ni crear entornos alternativos. Para comprobar que el entorno está completo: `pip install -r backend\requirements.txt` y `pip check`.
+
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
