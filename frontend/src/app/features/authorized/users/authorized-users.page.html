@@ -1,0 +1,482 @@
+<app-page-header
+  title="Usuarios"
+  subtitle="Cuentas del sistema con su rol principal, roles adicionales y permisos efectivos."
+>
+  <button class="button button--primary" type="button" (click)="openCreate()">
+    <app-icon name="user-plus" [size]="17" />
+    Nuevo usuario
+  </button>
+</app-page-header>
+
+<div class="toolbar">
+  <div class="toolbar__group search-box">
+    <app-icon name="search" [size]="17" />
+    <input
+      type="search"
+      placeholder="Buscar por nombre, correo o usuario"
+      aria-label="Buscar usuarios"
+      [formControl]="search"
+    />
+  </div>
+  <div class="toolbar__group">
+    <label class="inline-filter">
+      Rol
+      <select [formControl]="roleFilter" aria-label="Filtrar por rol">
+        <option [ngValue]="''">Todos</option>
+        @for (role of activeRoles(); track role.id) {
+          <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
+        }
+      </select>
+    </label>
+    <label class="inline-check">
+      <input type="checkbox" [formControl]="includeInactive" />
+      Ver eliminados
+    </label>
+  </div>
+</div>
+
+<div class="authorized-grid">
+  <section class="panel list-panel" aria-label="Listado de usuarios">
+    @if (loading()) {
+      <div class="loading-state">
+        <span class="spinner"></span>
+        Cargando usuarios
+      </div>
+    } @else if (error()) {
+      <div class="notice notice--error">{{ error() }}</div>
+    } @else if (users().length === 0) {
+      <app-empty-state
+        icon="users"
+        title="Sin usuarios"
+        message="Ajusta los filtros o crea la primera cuenta."
+      />
+    } @else {
+      <div class="table-wrap">
+        <table class="data-table user-table">
+          <thead>
+            <tr>
+              <th scope="col">Usuario</th>
+              <th scope="col">Rol</th>
+              <th scope="col">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (user of users(); track user.id) {
+              <tr
+                class="user-row"
+                [class.is-selected]="selectedId() === user.id"
+                (click)="select(user)"
+              >
+                <td>
+                  <button class="row-target" type="button" (click)="select(user)">
+                    <app-avatar [name]="user.nombre" [size]="32" />
+                    <span>
+                      <strong>{{ user.nombre }}</strong>
+                      <small>{{ user.correo }}</small>
+                    </span>
+                  </button>
+                </td>
+                <td>{{ roleLabel(user.rol_nombre) }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="statusOf(user)"
+                    [tone]="toneOf(user)"
+                  />
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <app-pagination
+        [page]="page()"
+        [count]="count()"
+        [pageSize]="pageSize"
+        (pageChange)="changePage($event)"
+      />
+    }
+  </section>
+
+  <aside class="record-panel" aria-live="polite">
+    @if (detailLoading()) {
+      <div class="loading-state">
+        <span class="spinner"></span>
+        Abriendo ficha
+      </div>
+    } @else {
+      @if (detail(); as user) {
+      <div class="record">
+        <header class="record__head">
+          <app-avatar [name]="user.nombre" [size]="46" />
+          <div>
+            <h2>{{ user.nombre }}</h2>
+            <p>{{ user.correo }}</p>
+          </div>
+          <app-status-badge [label]="statusOf(user)" [tone]="toneOf(user)" />
+        </header>
+
+        <dl class="record__fields">
+          <div>
+            <dt>Rol principal</dt>
+            <dd>{{ roleLabel(user.rol_detalle.nombre) }}</dd>
+          </div>
+          <div>
+            <dt>Roles adicionales</dt>
+            <dd>
+              @if (additionalRoles().length === 0) {
+                <span class="muted">Ninguno</span>
+              } @else {
+                <span class="tag-list">
+                  @for (role of additionalRoles(); track role.id) {
+                    <span class="tag">{{ roleLabel(role.nombre) }}</span>
+                  }
+                </span>
+              }
+            </dd>
+          </div>
+          <div>
+            <dt>Permisos efectivos</dt>
+            <dd class="record__number">{{ user.permisos.length }}</dd>
+          </div>
+          <div>
+            <dt>Usuario</dt>
+            <dd>{{ user.username || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Teléfono</dt>
+            <dd>{{ user.telefono || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Alta</dt>
+            <dd>{{ createdAt() }}</dd>
+          </div>
+        </dl>
+
+        @if (user.perfil_detalle; as perfil) {
+          <div class="record__section">
+            <h3>Perfil</h3>
+            <dl class="record__fields">
+              @if (perfil.objetivo) {
+                <div>
+                  <dt>Objetivo</dt>
+                  <dd>{{ perfil.objetivo }}</dd>
+                </div>
+              }
+              @if (perfil.especialidad) {
+                <div>
+                  <dt>Especialidad</dt>
+                  <dd>{{ perfil.especialidad }}</dd>
+                </div>
+              }
+              @if (perfil.cargo) {
+                <div>
+                  <dt>Cargo</dt>
+                  <dd>{{ perfil.cargo }}</dd>
+                </div>
+              }
+              @if (perfil.turno_preferido) {
+                <div>
+                  <dt>Turno</dt>
+                  <dd>{{ perfil.turno_preferido }}</dd>
+                </div>
+              }
+            </dl>
+          </div>
+        }
+
+        <div class="record__actions">
+          @if (canEdit()) {
+            <button class="button button--secondary button--sm" type="button" (click)="openIdentity()">
+              <app-icon name="edit" [size]="15" />
+              Editar
+            </button>
+            <button class="button button--secondary button--sm" type="button" (click)="openRoles()">
+              <app-icon name="shield" [size]="15" />
+              Roles
+            </button>
+            @if (user.is_active) {
+              <button class="button button--ghost button--sm" type="button" (click)="toggleActive()">
+                Desactivar
+              </button>
+            } @else {
+              <button class="button button--secondary button--sm" type="button" (click)="restore()">
+                Restaurar
+              </button>
+            }
+          }
+          @if (canDelete() && user.is_active) {
+            <button class="link-button link-button--danger" type="button" (click)="remove()">
+              Eliminar
+            </button>
+          }
+        </div>
+      </div>
+      } @else {
+        <app-empty-state
+          icon="user"
+          title="Ninguna ficha abierta"
+          message="Selecciona un usuario de la lista para revisar sus accesos."
+        />
+      }
+    }
+  </aside>
+</div>
+
+<app-modal
+  [open]="editor() === 'create'"
+  title="Nuevo usuario"
+  subtitle="Se crea la cuenta y su perfil según el rol principal."
+  size="wide"
+  (closed)="closeEditor()"
+>
+  <form [formGroup]="createForm" (ngSubmit)="saveCreate()" novalidate>
+    @if (formError()) {
+      <div class="notice notice--error">{{ formError() }}</div>
+    }
+
+    <div class="form-section">
+      <h3>Identidad</h3>
+      <div class="form-grid">
+        <div class="field">
+          <label for="create-rol">Rol principal</label>
+          <select id="create-rol" formControlName="rol">
+            @for (role of activeRoles(); track role.id) {
+              <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="create-nombre">Nombre completo</label>
+          <input id="create-nombre" type="text" formControlName="nombre" autocomplete="name" />
+          @if (createForm.controls.nombre.touched && createForm.controls.nombre.invalid) {
+            <p class="field-error">Escribe el nombre.</p>
+          }
+        </div>
+        <div class="field">
+          <label for="create-correo">Correo</label>
+          <input id="create-correo" type="email" formControlName="correo" autocomplete="email" />
+          @if (createForm.controls.correo.touched && createForm.controls.correo.invalid) {
+            <p class="field-error">Usa un correo válido.</p>
+          }
+        </div>
+        <div class="field">
+          <label for="create-username">Usuario</label>
+          <input id="create-username" type="text" formControlName="username" autocomplete="username" />
+          <p class="field-help">Opcional. Se genera a partir del correo si se deja vacío.</p>
+        </div>
+        <div class="field">
+          <label for="create-telefono">Teléfono</label>
+          <input id="create-telefono" type="tel" formControlName="telefono" autocomplete="tel" />
+        </div>
+        <div class="field">
+          <label for="create-contrasena">Contraseña temporal</label>
+          <input
+            id="create-contrasena"
+            type="text"
+            formControlName="contrasena"
+            autocomplete="new-password"
+          />
+          @if (createForm.controls.contrasena.touched && createForm.controls.contrasena.invalid) {
+            <p class="field-error">Mínimo 8 caracteres.</p>
+          }
+        </div>
+        <label class="inline-check field--full">
+          <input type="checkbox" formControlName="is_active" />
+          Cuenta activa desde el primer inicio de sesión
+        </label>
+      </div>
+    </div>
+
+    @if (profileRole()) {
+      <div class="form-section">
+        <h3>Perfil de {{ roleLabel(profileRole()) }}</h3>
+        <div class="form-grid">
+          @if (profileRole() === 'cliente') {
+            <div class="field">
+              <label for="create-tipo">Tipo de documento</label>
+              <select id="create-tipo" formControlName="tipo_documento">
+                <option value="">Sin especificar</option>
+                <option value="CC">Cédula de ciudadanía</option>
+                <option value="CE">Cédula de extranjería</option>
+                <option value="TI">Tarjeta de identidad</option>
+                <option value="PA">Pasaporte</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="create-numero">Número de documento</label>
+              <input id="create-numero" type="text" formControlName="numero_documento" />
+            </div>
+            <div class="field">
+              <label for="create-nacimiento">Fecha de nacimiento</label>
+              <input id="create-nacimiento" type="date" formControlName="fecha_nacimiento" />
+            </div>
+            <div class="field">
+              <label for="create-objetivo">Objetivo</label>
+              <input id="create-objetivo" type="text" formControlName="objetivo" />
+            </div>
+            <div class="field">
+              <label for="create-peso">Peso (kg)</label>
+              <input id="create-peso" type="number" step="0.1" formControlName="peso_kg" />
+            </div>
+            <div class="field">
+              <label for="create-estatura">Estatura (cm)</label>
+              <input id="create-estatura" type="number" formControlName="estatura_cm" />
+            </div>
+          }
+          @if (profileRole() === 'entrenador') {
+            <div class="field">
+              <label for="create-especialidad">Especialidad</label>
+              <input id="create-especialidad" type="text" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="create-certificacion">Certificación</label>
+              <input id="create-certificacion" type="text" formControlName="certificacion" />
+            </div>
+            <div class="field field--full">
+              <label for="create-bio">Biografía</label>
+              <textarea id="create-bio" formControlName="biografia"></textarea>
+            </div>
+          }
+          @if (profileRole() === 'terapeuta') {
+            <div class="field">
+              <label for="create-especialidad-t">Especialidad</label>
+              <input id="create-especialidad-t" type="text" formControlName="especialidad" />
+            </div>
+            <div class="field">
+              <label for="create-licencia">Licencia profesional</label>
+              <input id="create-licencia" type="text" formControlName="licencia_profesional" />
+            </div>
+          }
+          @if (profileRole() === 'recepcionista') {
+            <div class="field">
+              <label for="create-turno">Turno preferido</label>
+              <input id="create-turno" type="text" formControlName="turno_preferido" />
+            </div>
+          }
+          @if (profileRole() === 'administrador') {
+            <div class="field">
+              <label for="create-cargo">Cargo</label>
+              <input id="create-cargo" type="text" formControlName="cargo" />
+            </div>
+            <div class="field">
+              <label for="create-nivel">Nivel de permisos</label>
+              <select id="create-nivel" formControlName="nivel_permisos">
+                <option value="operativo">Operativo</option>
+                <option value="gestion">Gestión</option>
+                <option value="total">Total</option>
+              </select>
+            </div>
+          }
+          @if (profileRole() !== 'cliente') {
+            <div class="field">
+              <label for="create-ingreso">Fecha de ingreso</label>
+              <input id="create-ingreso" type="date" formControlName="fecha_ingreso" />
+            </div>
+          }
+        </div>
+      </div>
+    }
+
+    <div class="form-actions">
+      <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Creando…' : 'Crear usuario' }}
+      </button>
+    </div>
+  </form>
+</app-modal>
+
+<app-modal
+  [open]="editor() === 'identity'"
+  title="Editar identidad"
+  subtitle="El rol principal no se cambia desde aquí."
+  (closed)="closeEditor()"
+>
+  <form [formGroup]="identityForm" (ngSubmit)="saveIdentity()" novalidate>
+    @if (formError()) {
+      <div class="notice notice--error">{{ formError() }}</div>
+    }
+    <div class="form-grid">
+      <div class="field field--full">
+        <label for="edit-nombre">Nombre completo</label>
+        <input id="edit-nombre" type="text" formControlName="nombre" />
+      </div>
+      <div class="field">
+        <label for="edit-correo">Correo</label>
+        <input id="edit-correo" type="email" formControlName="correo" />
+      </div>
+      <div class="field">
+        <label for="edit-username">Usuario</label>
+        <input id="edit-username" type="text" formControlName="username" />
+      </div>
+      <div class="field">
+        <label for="edit-telefono">Teléfono</label>
+        <input id="edit-telefono" type="tel" formControlName="telefono" />
+      </div>
+      <div class="field field--full">
+        <label for="edit-contrasena">Nueva contraseña</label>
+        <input
+          id="edit-contrasena"
+          type="text"
+          formControlName="contrasena"
+          autocomplete="new-password"
+          placeholder="Déjala vacía para conservar la actual"
+        />
+        <p class="field-help">Se cierran las sesiones del usuario al guardarla.</p>
+        @if (identityForm.controls.contrasena.touched && identityForm.controls.contrasena.invalid) {
+          <p class="field-error">Mínimo 8 caracteres.</p>
+        }
+      </div>
+      <label class="inline-check field--full">
+        <input type="checkbox" formControlName="is_active" />
+        Cuenta activa
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando…' : 'Guardar cambios' }}
+      </button>
+    </div>
+  </form>
+</app-modal>
+
+<app-modal
+  [open]="editor() === 'roles'"
+  title="Roles adicionales"
+  subtitle="Suman permisos al rol principal. El rol principal siempre queda asignado."
+  (closed)="closeEditor()"
+>
+  @if (formError()) {
+    <div class="notice notice--error">{{ formError() }}</div>
+  }
+  @if (detail(); as user) {
+    <ul class="role-checklist">
+      @for (role of activeRoles(); track role.id) {
+        <li>
+          <label [class.is-locked]="role.id === user.rol">
+            <input
+              type="checkbox"
+              [checked]="role.id === user.rol || isRoleSelected(role.id)"
+              [disabled]="role.id === user.rol"
+              (change)="toggleRole(role.id, $any($event.target).checked)"
+            />
+            <span>
+              <strong>{{ roleLabel(role.nombre) }}</strong>
+              <small>{{ role.descripcion || 'Sin descripción' }} · {{ role.permisos.length }} permisos</small>
+            </span>
+            @if (role.id === user.rol) {
+              <span class="tag tag--muted">Principal</span>
+            }
+          </label>
+        </li>
+      }
+    </ul>
+  }
+  <div class="form-actions">
+    <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+    <button class="button button--primary" type="button" (click)="saveRoles()" [disabled]="saving()">
+      {{ saving() ? 'Guardando…' : 'Guardar roles' }}
+    </button>
+  </div>
+</app-modal>

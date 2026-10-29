@@ -1,0 +1,54 @@
+:host {
+  display: block;
+}
+
+.assignments-panel {
+  padding: 0.35rem 0.9rem 0.9rem;
+}
+
+.cell-name {
+  font-weight: 600;
+}
+
+.cell-muted {
+  color: var(--gc-muted);
+}
+
+.is-inactive td {
+  opacity: 0.62;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.toolbar__count {
+  color: var(--gc-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.inline-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+  white-space: nowrap;
+}
+
+.inline-filter select {
+  width: auto;
+  min-height: 2.2rem;
+  padding: 0.35rem 1.9rem 0.35rem 0.55rem;
+}
+
+.page-note {
+  max-width: 60ch;
+  margin: 0.9rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.82rem;
+}

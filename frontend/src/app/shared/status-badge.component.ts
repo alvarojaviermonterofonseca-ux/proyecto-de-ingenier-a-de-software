@@ -10,11 +10,12 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
       .badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
-        padding: 0.24rem 0.58rem;
-        border-radius: 999px;
+        gap: 0.32rem;
+        padding: 0.16rem 0.46rem;
+        border: 1px solid currentColor;
+        border-radius: 0.18rem;
         font-size: 0.73rem;
-        font-weight: 750;
+        font-weight: 600;
         white-space: nowrap;
       }
       .badge::before {

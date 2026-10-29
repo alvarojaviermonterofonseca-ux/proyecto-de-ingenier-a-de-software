@@ -1,0 +1,240 @@
+:host {
+  display: block;
+}
+
+.access-grid {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.8fr) minmax(0, 1.2fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.access-side {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.access-identity {
+  padding: 1.1rem 1.15rem;
+}
+
+.access-identity__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.access-identity__head > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.access-identity__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.access-identity__head p {
+  margin: 0.1rem 0 0;
+  overflow: hidden;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.record__fields dt {
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+}
+
+.record__fields dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.access-identity__roles {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.access-identity__roles h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.role-pills {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.role-pills li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--gc-border);
+  border-radius: var(--gc-radius-sm);
+  background: var(--gc-surface-2);
+}
+
+.role-pills strong {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.role-pills span {
+  color: var(--gc-muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.access-identity__footer {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.permission-total {
+  color: var(--gc-primary);
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.access-identity__footer p {
+  margin: 0;
+  color: var(--gc-muted);
+  font-size: 0.8rem;
+}
+
+.access-permissions {
+  padding: 1.1rem 1.15rem;
+}
+
+.access-permissions__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.access-permissions__head p {
+  margin: 0.15rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+}
+
+.permission-groups {
+  display: grid;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permission-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.9fr) minmax(0, 1.4fr);
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.permission-row:first-child {
+  border-top: 1px solid var(--gc-border);
+}
+
+.permission-row h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.permission-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permission-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: var(--gc-ink-soft);
+  font-size: 0.79rem;
+  white-space: nowrap;
+}
+
+.permission-list app-icon {
+  color: var(--gc-primary);
+}
+
+.password-panel {
+  padding: 1.1rem 1.15rem;
+}
+
+.password-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.password-panel__head .link-button {
+  white-space: nowrap;
+}
+
+.password-panel__head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.password-panel__head p {
+  margin: 0.15rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+}
+
+.password-panel form {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+@media (max-width: 960px) {
+  .access-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .password-panel__head {
+    flex-direction: column;
+  }
+  .record__fields {
+    grid-template-columns: 1fr;
+  }
+}

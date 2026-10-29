@@ -12,6 +12,7 @@ from .views import (
     ClienteTerapeutaViewSet,
     ClienteViewSet,
     ComidaViewSet,
+    ConteoRecursosView,
     EjercicioViewSet,
     EntrenadorViewSet,
     EntrenamientoViewSet,
@@ -82,5 +83,6 @@ urlpatterns = [
     path("me/password/", CambiarContrasenaView.as_view(), name="cambiar-contrasena"),
     path("me/perfil/", PerfilActualDetalleView.as_view(), name="perfil-actual-detalle"),
     path("resumen/", ResumenView.as_view(), name="resumen"),
+    path("conteos/", ConteoRecursosView.as_view(), name="conteos"),
     *router.urls,
 ]

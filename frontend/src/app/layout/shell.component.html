@@ -30,6 +30,13 @@
             >
               <app-icon [name]="item.icon" [size]="18" />
               <span>{{ item.label }}</span>
+              @if (item.count !== null) {
+                <span
+                  class="nav__count"
+                  [class.nav__count--empty]="item.count === 0"
+                  [attr.aria-label]="item.count + ' registros'"
+                >{{ item.count }}</span>
+              }
             </a>
           }
         </div>

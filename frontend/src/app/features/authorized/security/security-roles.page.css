@@ -1,0 +1,250 @@
+:host {
+  display: block;
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.55fr) minmax(0, 1.45fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.roles-list {
+  padding: 0.9rem;
+}
+
+.roles-list__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 0.15rem 0.6rem;
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.roles-list__head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.roles-list__items {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.role-item {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.6rem;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--gc-radius-sm);
+  color: var(--gc-ink);
+  background: transparent;
+  text-align: left;
+}
+
+.role-item:hover {
+  background: var(--gc-surface-2);
+}
+
+.role-item.active {
+  border-left-color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.role-item__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.role-item__top strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.role-item small {
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.role-item__meta {
+  color: var(--gc-muted);
+  font-size: 0.75rem;
+}
+
+.editor {
+  padding: 0.95rem 1rem 1rem;
+}
+
+.editor__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.editor__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.editor__head p {
+  margin: 0.15rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+}
+
+.editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.editor__toolbar .search-box {
+  min-width: min(16rem, 100%);
+  flex: 1;
+}
+
+.editor__count {
+  margin-left: auto;
+  color: var(--gc-muted);
+  font-size: 0.8rem;
+}
+
+.matrix-wrap {
+  overflow: auto;
+  max-height: 28rem;
+  border-bottom: 1px solid var(--gc-border);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.86rem;
+}
+
+.matrix th,
+.matrix td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--gc-border);
+  text-align: center;
+}
+
+.matrix thead th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  border-bottom: 1px solid var(--gc-border-strong);
+  color: var(--gc-muted);
+  background: var(--gc-surface);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.matrix__resource {
+  position: sticky;
+  z-index: 1;
+  left: 0;
+  min-width: 12rem;
+  color: var(--gc-ink);
+  background: var(--gc-surface);
+  text-align: left;
+  font-weight: 500;
+}
+
+.matrix thead th.matrix__resource {
+  z-index: 3;
+}
+
+.matrix__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.matrix__cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.matrix tbody tr:hover .matrix__resource {
+  background: var(--gc-surface-2);
+}
+
+.editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.editor__note {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+}
+
+.editor__footer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@media (max-width: 1080px) {
+  .roles-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.roles-list,
+.editor {
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  .matrix__resource {
+    min-width: 9rem;
+  }
+
+  .matrix th,
+  .matrix td {
+    padding: 0.4rem 0.3rem;
+  }
+
+  .editor {
+    padding: 0.85rem 0.75rem 0.9rem;
+  }
+
+  .editor__head {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .editor__footer-actions {
+    width: 100%;
+  }
+
+  .editor__footer-actions .button {
+    flex: 1;
+  }
+}

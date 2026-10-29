@@ -1298,7 +1298,7 @@ class PerfilActualUpdateSerializer(serializers.ModelSerializer):
         candidato = copy(self.instance)
         for campo, valor in attrs.items():
             setattr(candidato, campo, valor)
-        candidato._normalizar_campos()
+        # ``validar_modelo`` ejecuta ``clean()``, que normaliza la identidad.
         validar_modelo(candidato)
         return attrs
 

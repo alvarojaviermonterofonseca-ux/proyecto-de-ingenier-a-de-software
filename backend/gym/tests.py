@@ -162,6 +162,42 @@ class GymApiTests(APITestCase):
         self.assertEqual(respuesta.data["metricas"]["usuarios_activos"], 1)
         self.assertEqual(respuesta.data["actividad_reciente"], [])
 
+    def test_conteos_por_recurso_coinciden_con_los_listados(self):
+        self.assertEqual(self.client.get("/api/conteos/").status_code, 401)
+
+        self.crear_cliente()
+        self.autenticar()
+        conteos = self.client.get("/api/v1/conteos/").data
+
+        self.assertIn("usuarios", conteos)
+        for recurso in ("usuarios", "clientes", "roles"):
+            with self.subTest(recurso=recurso):
+                listado = self.client.get(f"/api/v1/{recurso}/").data
+                self.assertEqual(conteos[recurso], listado["count"])
+
+    def test_conteos_omiten_borrados_y_respetan_permisos(self):
+        self.crear_cliente()
+        self.autenticar()
+        base = self.client.get("/api/v1/conteos/").data["usuarios"]
+
+        extra = Usuario(rol=Rol.objects.get(nombre=Rol.Nombre.CLIENTE), nombre="Borrado", correo="borrado@example.com")
+        extra.set_password("UnaClaveSegura123")
+        extra.full_clean()
+        extra.save()
+        self.assertEqual(self.client.get("/api/v1/conteos/").data["usuarios"], base + 1)
+
+        extra.soft_delete()
+        self.assertEqual(self.client.get("/api/v1/conteos/").data["usuarios"], base)
+
+        self.client.credentials()
+        self.autenticar_como("ana@example.com", "UnaClaveSegura123")
+        conteos_cliente = self.client.get("/api/v1/conteos/").data
+        self.assertEqual(conteos_cliente["clientes"], 1)
+        self.assertEqual(conteos_cliente["entrenamientos"], 0)
+        self.assertNotIn("usuarios", conteos_cliente)
+        self.assertNotIn("roles", conteos_cliente)
+        self.assertNotIn("auditoria", conteos_cliente)
+
     def test_roles_iniciales_y_rutas_crud_requieren_autenticacion(self):
         self.assertEqual(Rol.objects.count(), 5)
         self.assertEqual(self.client.get("/api/").status_code, 200)

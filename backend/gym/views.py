@@ -1415,3 +1415,66 @@ class EventoAuditoriaViewSet(viewsets.ReadOnlyModelViewSet):
             return queryset
         return queryset.none()
 
+
+# Recursos con conteo en el menú de la SPA. La clave es la que consume el
+# frontend y el valor es el ViewSet que define el alcance de cada listado, de
+# modo que el número del menú coincide siempre con el total del recurso.
+RECURSOS_MENU = {
+    "usuarios": UsuarioViewSet,
+    "usuarios-roles": UsuarioRolViewSet,
+    "roles": RolViewSet,
+    "permisos": PermisoViewSet,
+    "clientes": ClienteViewSet,
+    "entrenadores": EntrenadorViewSet,
+    "terapeutas": TerapeutaViewSet,
+    "recepcionistas": RecepcionistaViewSet,
+    "administradores": AdministradorViewSet,
+    "asignaciones-cliente-entrenador": ClienteEntrenadorViewSet,
+    "clientes-terapeutas": ClienteTerapeutaViewSet,
+    "asistencias": AsistenciaViewSet,
+    "entrenamientos": EntrenamientoViewSet,
+    "ejercicios": EjercicioViewSet,
+    "planes-entrenamiento": PlanEntrenamientoViewSet,
+    "planes-alimentacion": PlanAlimentacionViewSet,
+    "comidas": ComidaViewSet,
+    "registros-comida": RegistroComidaViewSet,
+    "notificaciones": NotificacionViewSet,
+    "auditoria": EventoAuditoriaViewSet,
+}
+
+
+class ConteoRecursosView(APIView):
+    """Total de registros por recurso para los distintivos del menú.
+
+    Reutiliza los ViewSets de los listados, así que respeta el mismo alcance por
+    rol y el mismo borrado lógico: si el listado muestra 10 registros, el menú
+    muestra 10. Solo aparecen los recursos sobre los que el usuario tiene
+    permiso de lectura.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: OpenApiResponse(description="Conteo por recurso.")})
+    def get(self, request):
+        conteos = {}
+        for recurso, viewset_clase in RECURSOS_MENU.items():
+            if not self._puede_ver(recurso, viewset_clase):
+                continue
+            conteos[recurso] = self._contar(viewset_clase)
+        return Response(conteos)
+
+    def _puede_ver(self, recurso, viewset_clase):
+        usuario = self.request.user
+        if recurso == "auditoria" and not es_administrador(usuario):
+            return False
+        if not isinstance(usuario, Usuario):
+            return bool(getattr(usuario, "is_staff", False))
+        return usuario.tiene_permiso(f"{viewset_clase.recurso_permiso}:view")
+
+    def _contar(self, viewset_clase):
+        vista = viewset_clase()
+        vista.request = self.request
+        vista.action = "list"
+        vista.format_kwarg = None
+        return vista.get_queryset().count()
+

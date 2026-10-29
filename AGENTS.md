@@ -32,7 +32,7 @@ npm run build      # production build served by Django at /app/
 Verification:
 
 ```powershell
-python backend\manage.py test gym          # 55 tests, ~30s
+python backend\manage.py test gym          # 57 tests
 python backend\manage.py test gym.tests.GymApiTests.test_roles_iniciales_y_rutas_crud_requieren_autenticacion
 python backend\manage.py check
 python backend\manage.py makemigrations --check --dry-run
@@ -54,4 +54,5 @@ cd frontend; npm run build
 - API errors are always wrapped as `{"error": {"codigo", "mensaje", "detalles"}}`.
 - Food photos are private: stored under `media/private` (`PRIVATE_MEDIA_ROOT`), never served from `/media/`. Use authenticated `GET /api/v1/registros-comida/{id}/foto/`. The Angular UI fetches it as a blob with the Bearer token and revokes object URLs on destroy.
 - SPA routes are permission-driven: route `data.permission` accepts a code or array, and `data.adminOnly` restricts the route to the `administrador` role. Navigation is filtered through the same rules.
+- The sidebar badges come from `GET /api/v1/conteos/` (`ConteoRecursosView`), which counts each resource through its own ViewSet, so a badge always equals the list `count`. Nav items declare `counts` in `frontend/src/app/layout/nav.config.ts`.
 - `npm start` and production builds both use `sessionStorage` for the Bearer token, never `localStorage`.

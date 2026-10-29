@@ -1,0 +1,163 @@
+<app-page-header
+  title="Andrómeda"
+  subtitle="La app Android de Gym Control Pro: asistencias, planes y registros de comida desde el móvil."
+/>
+
+<div class="andromeda-grid">
+  <div class="andromeda-main">
+    <section class="panel download-card" aria-labelledby="andromeda-app">
+      <header class="download-card__head">
+        <span class="download-card__mark" aria-hidden="true">
+          <app-icon name="smartphone" [size]="28" />
+        </span>
+        <div class="download-card__identity">
+          <h2 id="andromeda-app">Andrómeda</h2>
+          <p>Aplicación Android · Gym Control Pro</p>
+        </div>
+        <app-status-badge
+          [label]="available ? 'Disponible' : 'En preparación'"
+          [tone]="available ? 'success' : 'neutral'"
+        />
+      </header>
+
+      <dl class="download-card__meta">
+        <div>
+          <dt>Versión</dt>
+          <dd>{{ version }}</dd>
+        </div>
+        <div>
+          <dt>Tamaño</dt>
+          <dd>{{ size }}</dd>
+        </div>
+        <div>
+          <dt>Actualizado</dt>
+          <dd>{{ updatedAt }}</dd>
+        </div>
+        <div>
+          <dt>Compatibilidad</dt>
+          <dd>{{ minAndroid }}</dd>
+        </div>
+      </dl>
+
+      <div class="download-card__actions">
+        @if (available) {
+          <a class="button button--primary" [href]="config.apkUrl" download>
+            <app-icon name="download" [size]="17" />
+            Descargar APK
+          </a>
+        } @else {
+          <button class="button button--primary" type="button" disabled>
+            <app-icon name="download" [size]="17" />
+            Descargar APK
+          </button>
+        }
+        <span class="download-card__hint">
+          @if (available) {
+            Descarga directa, sin tienda de aplicaciones.
+          } @else {
+            El APK aún no está publicado.
+          }
+        </span>
+      </div>
+
+      @if (!available) {
+        <div class="notice">
+          Para habilitar la descarga, publica el archivo APK y define
+          <code>andromeda.apkUrl</code> en
+          <code>frontend/src/environments/environment.ts</code>.
+        </div>
+      }
+    </section>
+
+    <section class="panel" aria-labelledby="andromeda-requirements">
+      <header class="panel__head">
+        <h2 id="andromeda-requirements">Requisitos</h2>
+      </header>
+      <dl class="record__fields">
+        <div>
+          <dt>Sistema</dt>
+          <dd>{{ minAndroid }}</dd>
+        </div>
+        <div>
+          <dt>Almacenamiento</dt>
+          <dd>60 MB libres</dd>
+        </div>
+        <div>
+          <dt>Conexión</dt>
+          <dd>Wi-Fi o datos móviles</dd>
+        </div>
+        <div>
+          <dt>Permisos</dt>
+          <dd>Cámara para los registros de comida</dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+
+  <div class="andromeda-side">
+    <section class="panel" aria-labelledby="andromeda-features">
+      <header class="panel__head">
+        <h2 id="andromeda-features">Qué incluye</h2>
+      </header>
+      <ul class="feature-list">
+        <li>
+          <app-icon name="check" [size]="14" />
+          Consulta de planes de entrenamiento y alimentación.
+        </li>
+        <li>
+          <app-icon name="check" [size]="14" />
+          Registro de asistencias con el mismo control de acceso.
+        </li>
+        <li>
+          <app-icon name="check" [size]="14" />
+          Registros de comida con foto desde la cámara del teléfono.
+        </li>
+        <li>
+          <app-icon name="check" [size]="14" />
+          Notificaciones y recordatorios del seguimiento.
+        </li>
+      </ul>
+    </section>
+
+    <section class="panel" aria-labelledby="andromeda-install">
+      <header class="panel__head">
+        <h2 id="andromeda-install">Instalación</h2>
+      </header>
+      <ol class="install-steps">
+        <li>
+          <span class="install-steps__index">1</span>
+          <div>
+            <strong>Descarga el APK</strong>
+            <p>Hazlo desde el teléfono, no desde el computador.</p>
+          </div>
+        </li>
+        <li>
+          <span class="install-steps__index">2</span>
+          <div>
+            <strong>Permite la instalación</strong>
+            <p>Android pedirá autorizar el origen de la descarga.</p>
+          </div>
+        </li>
+        <li>
+          <span class="install-steps__index">3</span>
+          <div>
+            <strong>Abre el archivo</strong>
+            <p>Confirma la instalación desde el aviso o el gestor de archivos.</p>
+          </div>
+        </li>
+        <li>
+          <span class="install-steps__index">4</span>
+          <div>
+            <strong>Inicia sesión</strong>
+            <p>Usa las mismas credenciales de Gym Control Pro.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+  </div>
+</div>
+
+<p class="page-note">
+  Andrómeda es la extensión móvil del sistema. Los permisos de tu cuenta se aplican igual
+  que en la web.
+</p>

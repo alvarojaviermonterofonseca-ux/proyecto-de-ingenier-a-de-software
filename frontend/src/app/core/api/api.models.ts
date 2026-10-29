@@ -392,6 +392,28 @@ export interface Notification {
   updated_at: string;
 }
 
+export interface UserRoleAssignment {
+  id: number;
+  usuario: number;
+  rol: number;
+  usuario_nombre: string;
+  rol_nombre: string;
+  activo: boolean;
+  asignado_por: number | null;
+  asignado_por_nombre: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RolePermissionAssignment {
+  id: number;
+  rol: number;
+  rol_nombre: string;
+  permiso: number;
+  permiso_codigo: string;
+  created_at: string;
+}
+
 export interface AuditEvent {
   id: number;
   actor: number | null;
@@ -425,3 +447,6 @@ export interface Summary {
   notificaciones_recientes: Notification[];
   actividad_reciente: AuditEvent[];
 }
+
+/** Total de registros por recurso (`GET /api/v1/conteos/`). */
+export type ResourceCounts = Record<string, number>;

@@ -23,15 +23,74 @@ export const routes: Routes = [
       },
       {
         path: 'usuarios',
-        canActivate: [permissionGuard],
-        data: { title: 'Usuarios', permission: 'usuarios:view' },
-        loadComponent: () => import('./features/users/users.page').then((m) => m.UsersPage),
+        pathMatch: 'full',
+        redirectTo: 'autorizados/usuarios',
       },
       {
         path: 'roles',
+        pathMatch: 'full',
+        redirectTo: 'autorizados/seguridad/roles',
+      },
+      {
+        path: 'autorizados',
         canActivate: [permissionGuard],
-        data: { title: 'Roles y permisos', permission: 'roles:view' },
-        loadComponent: () => import('./features/roles/roles.page').then((m) => m.RolesPage),
+        data: {
+          title: 'Autorizados',
+          permission: ['usuarios:view', 'roles:view', 'permisos:view'],
+        },
+        loadComponent: () =>
+          import('./features/authorized/authorized.layout').then((m) => m.AuthorizedLayout),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'usuarios' },
+          {
+            path: 'usuarios',
+            data: { title: 'Usuarios', permission: 'usuarios:view' },
+            loadComponent: () =>
+              import('./features/authorized/users/authorized-users.page').then(
+                (m) => m.AuthorizedUsersPage,
+              ),
+          },
+          {
+            path: 'seguridad/roles',
+            data: { title: 'Roles y permisos', permission: 'roles:view' },
+            loadComponent: () =>
+              import('./features/authorized/security/security-roles.page').then(
+                (m) => m.SecurityRolesPage,
+              ),
+          },
+          {
+            path: 'seguridad/permisos',
+            data: { title: 'Catálogo de permisos', permission: 'permisos:view' },
+            loadComponent: () =>
+              import('./features/authorized/security/security-permissions.page').then(
+                (m) => m.SecurityPermissionsPage,
+              ),
+          },
+          {
+            path: 'seguridad/asignaciones',
+            data: {
+              title: 'Asignaciones de rol',
+              permission: 'usuarios:view',
+              adminOnly: true,
+            },
+            loadComponent: () =>
+              import('./features/authorized/security/security-assignments.page').then(
+                (m) => m.SecurityAssignmentsPage,
+              ),
+          },
+        ],
+      },
+      {
+        path: 'mi-acceso',
+        data: { title: 'Mi acceso' },
+        loadComponent: () =>
+          import('./features/access/my-access.page').then((m) => m.MyAccessPage),
+      },
+      {
+        path: 'andromeda',
+        data: { title: 'Andrómeda' },
+        loadComponent: () =>
+          import('./features/downloads/andromeda.page').then((m) => m.AndromedaPage),
       },
       {
         path: 'auditoria',

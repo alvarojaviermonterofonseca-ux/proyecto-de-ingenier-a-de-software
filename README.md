@@ -138,6 +138,7 @@ La cascada se ejecuta en una transacción y es idempotente:
 - Al borrar un `PlanEntrenamiento` se eliminan físicamente sus filas de ejercicios. Al borrar un `PlanAlimentacion` se desactivan sus comidas; los registros de comida se conservan como historial.
 
 - `POST /api/v1/login/` (público), `POST /api/v1/logout/` y `GET /api/v1/me/`
+- `GET /api/v1/resumen/` (indicadores del panel) y `GET /api/v1/conteos/` (total por recurso para los distintivos del menú, calculado con el mismo alcance y borrado lógico que cada listado)
 
 - `/api/v1/roles/`, `/api/v1/permisos/`, `/api/v1/roles-permisos/`, `/api/v1/usuarios/`, `/api/v1/usuarios-roles/`
 - `GET|PUT /api/v1/roles/{id}/permisos/` y `GET|PATCH /api/v1/usuarios/{id}/roles/`

@@ -61,6 +61,10 @@ const ICONS: Record<string, readonly string[]> = {
   sparkles: ['m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z', 'M19 17l.9 2.1L22 20l-2.1.9L19 23l-.9-2.1L16 20l2.1-.9L19 17Z'],
   scale: ['M12 3v18', 'M5 7h14', 'M5 7l-3 6h6L5 7Z', 'M19 7l-3 6h6l-3-6Z'],
   ruler: ['M3 17 17 3l4 4L7 21l-4-4Z', 'm7 13 2 2', 'm10 10 2 2', 'm13 7 2 2'],
+  smartphone: [
+    'M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z',
+    'M12 18h.01',
+  ],
 };
 
 export type IconName = keyof typeof ICONS;

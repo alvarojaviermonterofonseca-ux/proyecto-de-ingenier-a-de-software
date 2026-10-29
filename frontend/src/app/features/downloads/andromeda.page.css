@@ -1,0 +1,205 @@
+:host {
+  display: block;
+}
+
+.andromeda-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(17rem, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.andromeda-grid > * {
+  min-width: 0;
+}
+
+.andromeda-main,
+.andromeda-side {
+  display: grid;
+  gap: 1rem;
+}
+
+.andromeda-main > *,
+.andromeda-side > * {
+  min-width: 0;
+}
+
+.download-card {
+  padding: 1.15rem 1.2rem 1.2rem;
+}
+
+.download-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.download-card__mark {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+  place-items: center;
+  border-radius: var(--gc-radius-sm);
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.download-card__identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.download-card__identity h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.download-card__identity p {
+  margin: 0.1rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.83rem;
+}
+
+.download-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 1.1rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.download-card__meta dt {
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+}
+
+.download-card__meta dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  margin-top: 1.15rem;
+}
+
+.download-card__hint {
+  color: var(--gc-muted);
+  font-size: 0.8rem;
+}
+
+.download-card .notice {
+  display: block;
+  margin-top: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.download-card code {
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--gc-radius-sm);
+  background: var(--gc-surface-3);
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-size: 0.8em;
+}
+
+.panel__head {
+  padding: 1rem 1.15rem 0;
+}
+
+.panel__head h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+.feature-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.85rem 1.15rem 1.1rem;
+  list-style: none;
+}
+
+.feature-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--gc-ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.feature-list app-icon {
+  margin-top: 0.2rem;
+  color: var(--gc-primary);
+}
+
+.install-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.9rem 1.15rem 1.1rem;
+  list-style: none;
+}
+
+.install-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.install-steps__index {
+  display: grid;
+  width: 1.45rem;
+  height: 1.45rem;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.install-steps strong {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.install-steps p {
+  margin: 0.1rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.81rem;
+  line-height: 1.45;
+}
+
+.page-note {
+  max-width: 70ch;
+  margin: 0.9rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 980px) {
+  .andromeda-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .download-card__head {
+    flex-wrap: wrap;
+  }
+
+  .download-card__meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

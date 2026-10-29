@@ -1,0 +1,188 @@
+<app-page-header
+  title="Catálogo de permisos"
+  subtitle="Los permisos se componen de un recurso y una acción. El código no se edita: si necesitas otro, créalo."
+>
+  @if (canCreate()) {
+    <button class="button button--primary" type="button" (click)="openCreate()">
+      <app-icon name="plus" [size]="17" />
+      Nuevo permiso
+    </button>
+  }
+</app-page-header>
+
+<div class="toolbar">
+  <div class="toolbar__group search-box">
+    <app-icon name="search" [size]="17" />
+    <input
+      type="search"
+      placeholder="Buscar por código o descripción"
+      aria-label="Buscar permisos"
+      [value]="query()"
+      (input)="updateQuery($any($event.target).value)"
+    />
+  </div>
+  <div class="toolbar__group">
+    <label class="inline-filter">
+      Recurso
+      <select
+        aria-label="Filtrar por recurso"
+        [value]="resourceFilter()"
+        (change)="updateResource($any($event.target).value)"
+      >
+        <option value="">Todos</option>
+        @for (resource of resources(); track resource) {
+          <option [value]="resource">{{ resource }}</option>
+        }
+      </select>
+    </label>
+    <span class="toolbar__count">{{ visibleCount() }} permisos</span>
+  </div>
+</div>
+
+<section class="panel catalog-panel">
+  @if (loading()) {
+    <div class="loading-state">
+      <span class="spinner"></span>
+      Cargando catálogo
+    </div>
+  } @else if (error()) {
+    <div class="notice notice--error">{{ error() }}</div>
+  } @else if (groups().length === 0) {
+    <app-empty-state
+      icon="shield"
+      title="Sin permisos"
+      message="Ningún permiso coincide con los filtros."
+    />
+  } @else {
+    <div class="table-wrap">
+      <table class="data-table catalog-table">
+        <thead>
+          <tr>
+            <th scope="col">Código</th>
+            <th scope="col">Descripción</th>
+            <th scope="col">Roles</th>
+            <th scope="col">Estado</th>
+            <th scope="col"><span class="sr-only">Acciones</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (group of groups(); track group.recurso) {
+            <tr class="catalog-group">
+              <th colspan="5" scope="rowgroup">
+                {{ group.label }}
+                <span class="catalog-group__code">{{ group.recurso }}</span>
+                <span class="catalog-group__count">{{ group.permissions.length }}</span>
+              </th>
+            </tr>
+            @for (permission of group.permissions; track permission.id) {
+              <tr [class.is-inactive]="!permission.is_active">
+                <td><code class="permission-code">{{ permission.codigo }}</code></td>
+                <td>{{ permission.descripcion || '—' }}</td>
+                <td class="catalog-number">{{ usageOf(permission.codigo) }}</td>
+                <td>
+                  <app-status-badge
+                    [label]="permission.is_active ? 'Activo' : 'Inactivo'"
+                    [tone]="permission.is_active ? 'success' : 'neutral'"
+                  />
+                </td>
+                <td>
+                  <div class="row-actions">
+                    @if (canEdit()) {
+                      <button
+                        class="icon-button"
+                        type="button"
+                        aria-label="Editar permiso"
+                        (click)="openEdit(permission)"
+                      >
+                        <app-icon name="edit" [size]="15" />
+                      </button>
+                      <button
+                        class="icon-button"
+                        type="button"
+                        [attr.aria-label]="permission.is_active ? 'Desactivar permiso' : 'Activar permiso'"
+                        (click)="toggleActive(permission)"
+                      >
+                        <app-icon [name]="permission.is_active ? 'eye-off' : 'eye'" [size]="15" />
+                      </button>
+                    }
+                    @if (canDelete() && permission.is_active) {
+                      <button
+                        class="icon-button"
+                        type="button"
+                        aria-label="Eliminar permiso"
+                        (click)="remove(permission)"
+                      >
+                        <app-icon name="trash" [size]="15" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>
+
+<app-modal
+  [open]="editor() !== null"
+  [title]="editing() ? 'Editar permiso' : 'Nuevo permiso'"
+  [subtitle]="
+    editing()
+      ? 'El código queda fijo porque los roles ya lo referencian.'
+      : 'El código se genera como recurso:acción.'
+  "
+  (closed)="closeEditor()"
+>
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    @if (formError()) {
+      <div class="notice notice--error">{{ formError() }}</div>
+    }
+    <div class="form-grid">
+      <div class="field">
+        <label for="permiso-recurso">Recurso</label>
+        <input
+          id="permiso-recurso"
+          type="text"
+          formControlName="recurso"
+          list="recursos-disponibles"
+          placeholder="nutricionistas"
+        />
+        <datalist id="recursos-disponibles">
+          @for (resource of resources(); track resource) {
+            <option [value]="resource"></option>
+          }
+        </datalist>
+        @if (form.controls.recurso.touched && form.controls.recurso.invalid) {
+          <p class="field-error">Usa minúsculas, números y guiones.</p>
+        }
+      </div>
+      <div class="field">
+        <label for="permiso-accion">Acción</label>
+        <select id="permiso-accion" formControlName="accion">
+          @for (action of actions; track action) {
+            <option [value]="action">{{ actionLabel(action) }} ({{ action }})</option>
+          }
+        </select>
+      </div>
+      <div class="field field--full">
+        <label for="permiso-descripcion">Descripción</label>
+        <input id="permiso-descripcion" type="text" formControlName="descripcion" />
+      </div>
+      @if (editing()) {
+        <label class="inline-check field--full">
+          <input type="checkbox" formControlName="is_active" />
+          Permiso activo
+        </label>
+      }
+    </div>
+    <div class="form-actions">
+      <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Guardando…' : editing() ? 'Guardar cambios' : 'Crear permiso' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

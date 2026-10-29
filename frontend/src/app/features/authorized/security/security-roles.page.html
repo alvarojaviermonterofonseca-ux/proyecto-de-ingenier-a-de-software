@@ -1,0 +1,223 @@
+<app-page-header
+  title="Roles y permisos"
+  subtitle="Cada rol define qué puede ver, crear, editar, eliminar y exportar en el sistema."
+>
+  @if (canCreate()) {
+    <button class="button button--primary" type="button" (click)="openCreate()">
+      <app-icon name="plus" [size]="17" />
+      Nuevo rol
+    </button>
+  }
+</app-page-header>
+
+@if (error()) {
+  <div class="notice notice--error">{{ error() }}</div>
+}
+
+<div class="roles-grid">
+  <section class="panel roles-list" aria-label="Roles">
+    <header class="roles-list__head">
+      <h2>Roles</h2>
+      <span class="muted">{{ roles().length }}</span>
+    </header>
+
+    @if (loading()) {
+      <div class="loading-state">
+        <span class="spinner"></span>
+        Cargando roles
+      </div>
+    } @else if (roles().length === 0) {
+      <app-empty-state
+        icon="shield"
+        title="Sin roles"
+        message="Crea un rol para agrupar permisos."
+      />
+    } @else {
+      <ul class="roles-list__items">
+        @for (role of roles(); track role.id) {
+          <li>
+            <button
+              class="role-item"
+              type="button"
+              [class.active]="selectedId() === role.id"
+              (click)="select(role)"
+            >
+              <span class="role-item__top">
+                <strong>{{ roleLabel(role.nombre) }}</strong>
+                @if (!role.is_active) {
+                  <app-status-badge label="Inactivo" tone="neutral" />
+                }
+              </span>
+              <small>{{ role.descripcion || 'Sin descripción' }}</small>
+              <span class="role-item__meta">
+                {{ role.permisos.length }} permisos · {{ role.total_usuarios }} usuarios
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
+  <section class="panel editor" aria-label="Editor de permisos">
+    @if (selectedRole(); as role) {
+      <header class="editor__head">
+        <div>
+          <h2>{{ roleLabel(role.nombre) }}</h2>
+          <p>{{ role.descripcion || 'Sin descripción' }}</p>
+        </div>
+        @if (canDelete()) {
+          <button
+            class="link-button link-button--danger"
+            type="button"
+            [disabled]="isProtected(role)"
+            [attr.title]="isProtected(role) ? 'Rol protegido por el sistema' : null"
+            (click)="remove(role)"
+          >
+            Eliminar rol
+          </button>
+        }
+      </header>
+
+      <div class="editor__toolbar">
+        <div class="search-box">
+          <app-icon name="search" [size]="16" />
+          <input
+            type="search"
+            placeholder="Filtrar por recurso o código"
+            aria-label="Filtrar permisos"
+            [value]="query()"
+            (input)="updateQuery($any($event.target).value)"
+          />
+        </div>
+        <label class="inline-check">
+          <input
+            type="checkbox"
+            [checked]="onlyAssigned()"
+            (change)="toggleOnlyAssigned($any($event.target).checked)"
+          />
+          Solo asignados
+        </label>
+        <span class="editor__count">{{ selectedCount() }} de {{ totalPermissions() }}</span>
+      </div>
+
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="matrix__resource" scope="col">Recurso</th>
+              @for (action of actions; track action) {
+                <th scope="col">{{ actionLabel(action) }}</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (group of visibleGroups(); track group.recurso) {
+              <tr>
+                <th class="matrix__resource" scope="row">
+                  <label class="matrix__group">
+                    <input
+                      type="checkbox"
+                      [checked]="groupState(group) === 'all'"
+                      [indeterminate]="groupState(group) === 'partial'"
+                      [disabled]="!canEditPermissions()"
+                      (change)="toggleGroup(group, $any($event.target).checked)"
+                    />
+                    <span>{{ group.label }}</span>
+                  </label>
+                </th>
+                @for (action of actions; track action) {
+                  <td>
+                    @if (permissionFor(group, action); as permission) {
+                      <label class="matrix__cell">
+                        <input
+                          type="checkbox"
+                          [checked]="isChecked(permission.codigo)"
+                          [disabled]="!canEditPermissions()"
+                          (change)="togglePermission(permission.codigo, $any($event.target).checked)"
+                        />
+                        <span class="sr-only">{{ permission.codigo }}</span>
+                      </label>
+                    } @else {
+                      <span class="muted" aria-hidden="true">—</span>
+                    }
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      @if (visibleGroups().length === 0) {
+        <app-empty-state
+          icon="search"
+          title="Sin coincidencias"
+          message="Ningún permiso coincide con el filtro."
+        />
+      }
+
+      <footer class="editor__footer">
+        <p class="editor__note">
+          Guardar renueva las sesiones de los usuarios con este rol.
+        </p>
+        <div class="editor__footer-actions">
+          <button
+            class="button button--ghost button--sm"
+            type="button"
+            [disabled]="!dirty() || saving()"
+            (click)="revert()"
+          >
+            Descartar
+          </button>
+          <button
+            class="button button--primary button--sm"
+            type="button"
+            [disabled]="!dirty() || saving() || !canEditPermissions()"
+            (click)="save()"
+          >
+            {{ saving() ? 'Guardando…' : 'Guardar permisos' }}
+          </button>
+        </div>
+      </footer>
+    } @else {
+      <app-empty-state
+        icon="shield"
+        title="Ningún rol seleccionado"
+        message="Elige un rol de la lista para editar sus permisos."
+      />
+    }
+  </section>
+</div>
+
+<app-modal
+  [open]="editor() === 'create'"
+  title="Nuevo rol"
+  subtitle="El nombre se usa como identificador; se guarda en minúsculas."
+  (closed)="closeEditor()"
+>
+  <form [formGroup]="form" (ngSubmit)="createRole()" novalidate>
+    @if (formError()) {
+      <div class="notice notice--error">{{ formError() }}</div>
+    }
+    <div class="form-grid">
+      <div class="field">
+        <label for="role-nombre">Nombre</label>
+        <input id="role-nombre" type="text" formControlName="nombre" placeholder="nutricionista" />
+        @if (form.controls.nombre.touched && form.controls.nombre.invalid) {
+          <p class="field-error">Escribe un nombre de hasta 50 caracteres.</p>
+        }
+      </div>
+      <div class="field">
+        <label for="role-descripcion">Descripción</label>
+        <input id="role-descripcion" type="text" formControlName="descripcion" />
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Creando…' : 'Crear rol' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

@@ -36,11 +36,10 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
       }
       .eyebrow {
         margin: 0 0 0.35rem;
-        color: var(--gc-primary);
-        font-size: 0.72rem;
-        font-weight: 800;
-        letter-spacing: 0.13em;
-        text-transform: uppercase;
+        color: var(--gc-muted);
+        font-size: 0.8rem;
+        font-weight: 500;
+        letter-spacing: 0;
       }
       .page-header__subtitle {
         max-width: 48rem;

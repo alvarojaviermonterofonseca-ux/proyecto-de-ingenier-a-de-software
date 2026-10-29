@@ -3,6 +3,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 
+import { ApiClient } from '../core/api/api-client.service';
+import type { ResourceCounts } from '../core/api/api.models';
 import { AuthService } from '../core/auth/auth.service';
 import { LoadingService } from '../core/api/loading.service';
 import { ConfirmService } from '../core/ui/confirm.service';
@@ -33,6 +35,7 @@ export class ShellComponent {
   protected readonly auth = inject(AuthService);
   protected readonly theme = inject(ThemeService);
   protected readonly loading = inject(LoadingService);
+  private readonly api = inject(ApiClient);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
@@ -40,23 +43,30 @@ export class ShellComponent {
 
   protected readonly sidebarOpen = signal(false);
   protected readonly pageTitle = signal('Inicio');
-  protected readonly today = new Intl.DateTimeFormat('es-CO', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  }).format(new Date());
-
-  protected readonly groups = computed(() =>
-    NAV_GROUPS.map((group) => ({
-      ...group,
-      items: group.items.filter((item) => this.canSee(item)),
-    })).filter((group) => group.items.length > 0),
+  protected readonly counts = signal<ResourceCounts>({});
+  protected readonly today = capitalize(
+    new Intl.DateTimeFormat('es-CO', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(new Date()),
   );
+
+  protected readonly groups = computed(() => {
+    const counts = this.counts();
+    return NAV_GROUPS.map((group) => ({
+      ...group,
+      items: group.items
+        .filter((item) => this.canSee(item))
+        .map((item) => ({ ...item, count: contar(item, counts) })),
+    })).filter((group) => group.items.length > 0);
+  });
 
   protected readonly role = computed(() => roleLabel(this.auth.roleName()));
 
   constructor() {
     this.updateTitle();
+    this.loadCounts();
     this.router.events
       .pipe(
         filter((event): event is NavigationEnd => event instanceof NavigationEnd),
@@ -65,6 +75,19 @@ export class ShellComponent {
       .subscribe(() => {
         this.updateTitle();
         this.sidebarOpen.set(false);
+        // Los totales se recalculan al navegar para reflejar altas y bajas.
+        this.loadCounts();
+      });
+  }
+
+  private loadCounts(): void {
+    this.api
+      .get<ResourceCounts>('conteos/')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (counts) => this.counts.set(counts ?? {}),
+        // El menú sigue siendo utilizable aunque falle el conteo.
+        error: () => this.counts.set({}),
       });
   }
 
@@ -103,9 +126,8 @@ export class ShellComponent {
     if (!item.permission) {
       return true;
     }
-    return this.auth.hasAny(
-      Array.isArray(item.permission) ? item.permission : [item.permission],
-    );
+    const codes = Array.isArray(item.permission) ? item.permission : [item.permission];
+    return item.permissionMode === 'all' ? this.auth.hasAll(codes) : this.auth.hasAny(codes);
   }
 
   private updateTitle(): void {
@@ -120,4 +142,21 @@ export class ShellComponent {
     }
     this.pageTitle.set(title);
   }
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/**
+ * Total del distintivo de un elemento del menú. Con varios recursos suma sus
+ * conteos; devuelve `null` cuando el elemento no muestra cifra o cuando el
+ * backend no reportó ninguno de sus recursos.
+ */
+function contar(item: NavItem, counts: ResourceCounts): number | null {
+  const claves = item.counts ?? [];
+  if (claves.length === 0 || !claves.some((clave) => clave in counts)) {
+    return null;
+  }
+  return claves.reduce((total, clave) => total + (counts[clave] ?? 0), 0);
 }

@@ -22,8 +22,11 @@ export const permissionGuard: CanActivateFn = async (route, state) => {
   if (!required) {
     return true;
   }
+  const mode = route.data['permissionMode'] === 'all' ? 'all' : 'any';
   const allowed = Array.isArray(required)
-    ? auth.hasAny(required)
+    ? mode === 'all'
+      ? auth.hasAll(required)
+      : auth.hasAny(required)
     : auth.hasPermission(required);
   if (allowed) {
     return true;

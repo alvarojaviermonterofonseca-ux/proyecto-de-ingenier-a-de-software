@@ -95,6 +95,10 @@ export class AuthService {
     return codes.length === 0 || codes.some((code) => this.hasPermission(code));
   }
 
+  hasAll(codes: readonly string[]): boolean {
+    return codes.every((code) => this.hasPermission(code));
+  }
+
   private applyUser(user: CurrentUser): void {
     this._user.set(user);
     this._permissions.set(new Set(user.permisos_efectivos ?? user.permisos ?? []));

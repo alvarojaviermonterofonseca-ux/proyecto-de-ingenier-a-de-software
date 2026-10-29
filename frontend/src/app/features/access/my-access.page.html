@@ -1,0 +1,163 @@
+<app-page-header
+  title="Mi acceso"
+  subtitle="Lo que tu cuenta puede hacer hoy, según tus roles y permisos efectivos."
+/>
+
+@if (user(); as current) {
+  <div class="access-grid">
+    <div class="access-side">
+      <section class="panel access-identity">
+        <header class="access-identity__head">
+          <app-avatar [name]="current.nombre" [size]="52" />
+          <div>
+            <h2>{{ current.nombre }}</h2>
+            <p>{{ current.correo }}</p>
+          </div>
+          <app-status-badge
+            [label]="current.is_active ? 'Activa' : 'Inactiva'"
+            [tone]="current.is_active ? 'success' : 'neutral'"
+          />
+        </header>
+
+        <dl class="record__fields">
+          <div>
+            <dt>Rol principal</dt>
+            <dd>{{ roleLabel(current.rol_detalle.nombre) }}</dd>
+          </div>
+          <div>
+            <dt>Usuario</dt>
+            <dd>{{ current.username || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Teléfono</dt>
+            <dd>{{ current.telefono || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Actualizado</dt>
+            <dd>{{ lastAccess() }}</dd>
+          </div>
+        </dl>
+
+        <div class="access-identity__roles">
+          <h3>Roles adicionales</h3>
+          @if (additionalRoles().length === 0) {
+            <p class="muted">Solo tienes tu rol principal.</p>
+          } @else {
+            <ul class="role-pills">
+              @for (role of additionalRoles(); track role.id) {
+                <li>
+                  <strong>{{ roleLabel(role.nombre) }}</strong>
+                  <span>{{ role.permisos.length }} permisos</span>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+
+        <footer class="access-identity__footer">
+          <span class="permission-total">{{ codes().length }}</span>
+          <p>permisos efectivos en {{ groups().length }} recursos</p>
+        </footer>
+      </section>
+
+      <section class="panel password-panel">
+        <header class="password-panel__head">
+          <div>
+            <h2>Contraseña</h2>
+            <p>Al cambiarla se cierran las demás sesiones abiertas de tu cuenta.</p>
+          </div>
+          <button class="link-button" type="button" (click)="showPassword.set(!showPassword())">
+            {{ showPassword() ? 'Ocultar formulario' : 'Cambiar contraseña' }}
+          </button>
+        </header>
+
+        @if (showPassword()) {
+          <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+            @if (formError()) {
+              <div class="notice notice--error">{{ formError() }}</div>
+            }
+            <div class="form-grid">
+              <div class="field field--full">
+                <label for="password-actual">Contraseña actual</label>
+                <input
+                  id="password-actual"
+                  type="password"
+                  formControlName="contrasena_actual"
+                  autocomplete="current-password"
+                />
+                @if (fieldError('contrasena_actual'); as message) {
+                  <p class="field-error">{{ message }}</p>
+                }
+              </div>
+              <div class="field field--full">
+                <label for="password-nueva">Contraseña nueva</label>
+                <input
+                  id="password-nueva"
+                  type="password"
+                  formControlName="contrasena_nueva"
+                  autocomplete="new-password"
+                />
+                <p class="field-help">Mínimo 8 caracteres.</p>
+                @if (fieldError('contrasena_nueva'); as message) {
+                  <p class="field-error">{{ message }}</p>
+                }
+              </div>
+              <div class="field field--full">
+                <label for="password-confirmacion">Repite la contraseña nueva</label>
+                <input
+                  id="password-confirmacion"
+                  type="password"
+                  formControlName="confirmacion"
+                  autocomplete="new-password"
+                />
+                @if (fieldError('confirmacion'); as message) {
+                  <p class="field-error">{{ message }}</p>
+                }
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="button button--ghost" type="button" (click)="showPassword.set(false)">
+                Cancelar
+              </button>
+              <button class="button button--primary" type="submit" [disabled]="saving()">
+                {{ saving() ? 'Guardando…' : 'Cambiar contraseña' }}
+              </button>
+            </div>
+          </form>
+        }
+      </section>
+    </div>
+
+    <section class="panel access-permissions" aria-label="Permisos efectivos">
+      <header class="access-permissions__head">
+        <h2>Permisos efectivos</h2>
+        <p>La suma de tu rol principal y tus roles adicionales.</p>
+      </header>
+
+      @if (groups().length === 0) {
+        <p class="muted">Tu cuenta no tiene permisos asignados.</p>
+      } @else {
+        <ul class="permission-groups">
+          @for (group of groups(); track group.recurso) {
+            <li class="permission-row">
+              <h3>{{ group.label }}</h3>
+              <ul class="permission-list">
+                @for (permission of group.permissions; track permission.codigo) {
+                  <li>
+                    <app-icon name="check" [size]="13" />
+                    {{ actionLabel(permission.accion) }}
+                  </li>
+                }
+              </ul>
+            </li>
+          }
+        </ul>
+      }
+    </section>
+  </div>
+} @else {
+  <div class="loading-state">
+    <span class="spinner"></span>
+    Cargando tu cuenta
+  </div>
+}

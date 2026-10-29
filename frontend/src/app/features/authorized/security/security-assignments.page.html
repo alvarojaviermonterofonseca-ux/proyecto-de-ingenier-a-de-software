@@ -1,0 +1,156 @@
+<app-page-header
+  title="Asignaciones de rol"
+  subtitle="Tabla puente entre usuarios y roles. Un usuario puede tener varios roles además del principal."
+>
+  <button class="button button--primary" type="button" (click)="openCreate()">
+    <app-icon name="plus" [size]="17" />
+    Asignar rol
+  </button>
+</app-page-header>
+
+<div class="toolbar">
+  <div class="toolbar__group search-box">
+    <app-icon name="search" [size]="17" />
+    <input
+      type="search"
+      placeholder="Buscar por usuario o rol"
+      aria-label="Buscar asignaciones"
+      [formControl]="filter.controls.usuario"
+    />
+  </div>
+  <div class="toolbar__group">
+    <label class="inline-filter">
+      Rol
+      <select [formControl]="filter.controls.rol" aria-label="Filtrar por rol">
+        <option [ngValue]="0">Todos</option>
+        @for (role of roles(); track role.id) {
+          <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
+        }
+      </select>
+    </label>
+    <label class="inline-filter">
+      Estado
+      <select [formControl]="filter.controls.activo" aria-label="Filtrar por estado">
+        <option value="">Todas</option>
+        <option value="activos">Activas</option>
+        <option value="inactivos">Inactivas</option>
+      </select>
+    </label>
+    <span class="toolbar__count">{{ visible().length }} de {{ assignments().length }}</span>
+    <button class="link-button" type="button" (click)="clearFilters()">Limpiar</button>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="notice notice--error">{{ error() }}</div>
+}
+
+<section class="panel assignments-panel">
+  @if (loading()) {
+    <div class="loading-state">
+      <span class="spinner"></span>
+      Cargando asignaciones
+    </div>
+  } @else if (visible().length === 0) {
+    <app-empty-state
+      icon="shield"
+      title="Sin asignaciones"
+      message="Asigna un rol adicional a un usuario para verlo aquí."
+    />
+  } @else {
+    <div class="table-wrap">
+      <table class="data-table assignments-table">
+        <thead>
+          <tr>
+            <th scope="col">Usuario</th>
+            <th scope="col">Rol</th>
+            <th scope="col">Asignado por</th>
+            <th scope="col">Fecha</th>
+            <th scope="col">Estado</th>
+            <th scope="col"><span class="sr-only">Acciones</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of visible(); track item.id) {
+            <tr [class.is-inactive]="!item.activo">
+              <td class="cell-name">{{ item.usuario_nombre }}</td>
+              <td>
+                <span class="tag">{{ roleLabel(item.rol_nombre) }}</span>
+              </td>
+              <td class="cell-muted">{{ item.asignado_por_nombre || 'Sistema' }}</td>
+              <td class="cell-muted">{{ formatDate(item.created_at) }}</td>
+              <td>
+                <app-status-badge
+                  [label]="item.activo ? 'Activa' : 'Inactiva'"
+                  [tone]="item.activo ? 'success' : 'neutral'"
+                />
+              </td>
+              <td>
+                <div class="row-actions">
+                  @if (isPrincipal(item)) {
+                    <span class="tag tag--muted">Principal</span>
+                  } @else {
+                    <button class="link-button" type="button" (click)="toggleActive(item)">
+                      {{ item.activo ? 'Desactivar' : 'Activar' }}
+                    </button>
+                    <button
+                      class="icon-button"
+                      type="button"
+                      aria-label="Revocar asignación"
+                      (click)="remove(item)"
+                    >
+                      <app-icon name="trash" [size]="15" />
+                    </button>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>
+
+<p class="page-note">
+  Las asignaciones activas se suman al rol principal del usuario. Cambiar o revocar roles
+  cierra sus sesiones abiertas.
+</p>
+
+<app-modal
+  [open]="editor()"
+  title="Asignar rol"
+  subtitle="El usuario conserva su rol principal y suma los permisos de este rol."
+  (closed)="closeEditor()"
+>
+  <form [formGroup]="form" (ngSubmit)="create()" novalidate>
+    @if (formError()) {
+      <div class="notice notice--error">{{ formError() }}</div>
+    }
+    <div class="form-grid">
+      <div class="field">
+        <label for="assign-usuario">Usuario</label>
+        <select id="assign-usuario" formControlName="usuario">
+          @for (user of users(); track user.id) {
+            <option [ngValue]="user.id">{{ user.nombre }} · {{ user.correo }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label for="assign-rol">Rol</label>
+        <select id="assign-rol" formControlName="rol">
+          @for (role of roles(); track role.id) {
+            <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
+          }
+        </select>
+        <p class="field-help">Solo se ofrecen roles activos.</p>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+      <button class="button button--primary" type="submit" [disabled]="saving()">
+        {{ saving() ? 'Asignando…' : 'Asignar rol' }}
+      </button>
+    </div>
+  </form>
+</app-modal>

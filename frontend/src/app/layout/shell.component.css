@@ -36,10 +36,8 @@
   flex: none;
   flex-direction: column;
   overflow: hidden;
-  color: #dcefe3;
-  background:
-    radial-gradient(circle at 0% 0%, rgb(200 243 123 / 13%), transparent 18rem),
-    var(--gc-sidebar);
+  color: #d7dbd8;
+  background: var(--gc-sidebar);
 }
 
 .brand {
@@ -53,14 +51,13 @@
 
 .brand__mark {
   display: grid;
-  width: 2.55rem;
-  height: 2.55rem;
+  width: 2.4rem;
+  height: 2.4rem;
   place-items: center;
-  border: 1px solid rgb(200 243 123 / 32%);
-  border-radius: 0.8rem;
-  color: #0f2a1b;
-  background: var(--gc-lime);
-  box-shadow: 0 8px 22px rgb(0 0 0 / 18%);
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 0.3rem;
+  color: var(--gc-sidebar);
+  background: #eceae4;
 }
 
 .brand strong {
@@ -72,11 +69,10 @@
 .brand small {
   display: block;
   margin-top: 0.08rem;
-  color: #9dc4ac;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  color: #9aa39f;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .nav {
@@ -93,13 +89,12 @@
 }
 
 .nav__label {
-  margin: 0 0 0.3rem;
+  margin: 0 0 0.35rem;
   padding: 0 0.55rem;
-  color: #83a891;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+  color: #8b9490;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .nav__link {
@@ -111,17 +106,50 @@
   margin-bottom: 0.15rem;
   padding: 0.5rem 0.6rem;
   border: 1px solid transparent;
-  border-radius: 0.62rem;
-  color: #bed6c7;
-  font-size: 0.83rem;
-  font-weight: 650;
+  border-radius: 0.28rem;
+  color: #b9c0bc;
+  font-size: 0.84rem;
+  font-weight: 500;
   text-decoration: none;
   transition: 140ms ease;
 }
 
 .nav__link app-icon {
-  color: #83ad94;
+  color: #8b9490;
   transition: color 140ms ease;
+}
+
+.nav__count {
+  min-width: 1.45rem;
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: #e6e8e4;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  transition: 140ms ease;
+}
+
+.nav__link:hover .nav__count,
+.nav__link.active .nav__count {
+  background: rgb(255 255 255 / 16%);
+  color: #fff;
+}
+
+.nav__count--empty {
+  background: transparent;
+  color: #6f7873;
+  font-weight: 500;
+}
+
+.nav__link:hover .nav__count--empty,
+.nav__link.active .nav__count--empty {
+  background: transparent;
+  color: #a2aaa5;
 }
 
 .nav__link:hover {
@@ -130,28 +158,27 @@
 }
 
 .nav__link:hover app-icon {
-  color: var(--gc-lime);
+  color: #fff;
 }
 
 .nav__link.active {
-  border-color: rgb(200 243 123 / 22%);
+  border-color: transparent;
   color: #fff;
-  background: linear-gradient(90deg, rgb(200 243 123 / 14%), rgb(255 255 255 / 5%));
+  background: rgb(255 255 255 / 9%);
 }
 
 .nav__link.active::before {
   position: absolute;
-  top: 25%;
+  top: 0;
   left: -0.75rem;
-  width: 3px;
-  height: 50%;
-  border-radius: 0 999px 999px 0;
-  background: var(--gc-lime);
+  width: 2px;
+  height: 100%;
+  background: #eceae4;
   content: '';
 }
 
 .nav__link.active app-icon {
-  color: var(--gc-lime);
+  color: #fff;
 }
 
 .sidebar__footer {
@@ -190,8 +217,8 @@
 
 .sidebar__user span {
   margin-top: 0.08rem;
-  color: #8fb59e;
-  font-size: 0.7rem;
+  color: #9aa39f;
+  font-size: 0.72rem;
 }
 
 .sidebar__logout {
@@ -250,10 +277,9 @@
 .topbar__eyebrow {
   margin: 0 0 0.1rem;
   color: var(--gc-muted);
-  font-size: 0.68rem;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: capitalize;
+  font-size: 0.76rem;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .topbar__actions {
