@@ -210,19 +210,24 @@ export class SecurityRolesPage implements OnInit {
   protected save(): void {
     const role = this.selectedRole();
     if (!role) return;
+    const permisos = [...this.draft()].sort();
     this.saving.set(true);
     this.api
-      .put(`roles/${role.id}/permisos/`, { permisos: [...this.draft()].sort() })
+      .put(`roles/${role.id}/permisos/`, { permisos })
       .subscribe({
         next: () => {
           this.saving.set(false);
+          this.roles.update((roles) =>
+            roles.map((item) => (item.id === role.id ? { ...item, permisos } : item)),
+          );
           this.toast.success(
             'Permisos guardados',
-            'Las sesiones de los usuarios con este rol se renovaron.',
+            'El menú y los accesos se actualizan sin cerrar la sesión.',
           );
-          const keep = role.id;
+          // Refresca los permisos del usuario actual para que el menú lateral
+          // refleje el cambio de inmediato.
+          this.auth.refresh().subscribe({ error: () => undefined });
           this.load();
-          this.selectedId.set(keep);
         },
         error: (error: unknown) => {
           this.saving.set(false);

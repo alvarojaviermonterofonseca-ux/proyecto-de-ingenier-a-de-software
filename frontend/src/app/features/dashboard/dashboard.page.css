@@ -95,6 +95,106 @@
   background: rgb(255 255 255 / 10%);
 }
 
+/* Tarjeta de llegada y visitas semanales (solo clientes). */
+.checkin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--gc-border);
+  border-radius: var(--gc-radius-lg);
+  background:
+    radial-gradient(circle at 0% 0%, rgb(200 243 123 / 18%), transparent 12rem),
+    var(--gc-surface);
+  box-shadow: var(--gc-shadow-sm);
+}
+
+.checkin__eyebrow {
+  color: var(--gc-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.checkin__copy h2 {
+  margin: 0.2rem 0 0.15rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.03em;
+}
+
+.checkin__week-label {
+  margin: 0;
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+}
+
+.checkin__status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+  color: #1f7a4d;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.checkin__status--idle {
+  color: var(--gc-muted);
+  font-weight: 500;
+}
+
+.checkin__days {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.checkin__day {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+}
+
+.checkin__dot {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--gc-surface-3);
+  color: var(--gc-muted);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.checkin__day--on .checkin__dot {
+  background: var(--gc-primary);
+  color: #fff;
+}
+
+.checkin__day small {
+  color: var(--gc-muted);
+  font-size: 0.62rem;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.checkin__button {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .checkin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checkin__days {
+    flex-wrap: wrap;
+  }
+}
+
 .metric-skeleton {
   display: grid;
   gap: 0.65rem;

@@ -82,7 +82,7 @@ El RBAC por recurso se complementa con alcance por rol y propiedad, de modo que 
 - `entrenador` y `terapeuta` solo ven los clientes con una asignación activa y sus datos relacionados.
 - `recepcionista` ve los clientes y sus datos operativos; los campos clínicos (`objetivo`, `peso_kg`, `estatura_cm`, `fecha_nacimiento`) no se exponen ni se aceptan en sus ediciones.
 - Un usuario sin visibilidad sobre el registro recibe `404`; si carece del permiso de recurso recibe `403`. Nunca se filtra la existencia de datos ajenos.
-- Las sesiones se revocan al cambiar contraseña, desactivar la cuenta, cambiar el rol principal, modificar roles adicionales o alterar los permisos de un rol. Cada cambio de roles/permisos queda registrado en `auditoria_eventos` y puede consultarse en `GET /api/v1/auditoria/` como administrador.
+- Las sesiones se revocan al cambiar contraseña, desactivar la cuenta o cambiar los roles de un usuario; la sesión que hace el cambio se conserva. Los cambios de permisos **no** revocan sesiones: los permisos se leen de la base en cada petición, así que el menú y los accesos cambian al instante y el cliente refresca `/me/` al guardar o al volver a la pestaña. Cada cambio de roles/permisos queda registrado en `auditoria_eventos` y puede consultarse en `GET /api/v1/auditoria/` como administrador.
 
 La migración `0005` siembra los 90 permisos iniciales (18 recursos × 5 acciones), asigna la política inicial de los cinco roles y rellena `usuario_rol` para los usuarios existentes. La migración `0007` agrega el recurso `clientes-terapeutas` y sus 5 permisos, por lo que el catálogo final tiene 95 permisos. Los roles personalizados se crean con `POST /api/v1/roles/` y no reciben permisos por defecto; asígnalos con `PUT /api/v1/roles/{id}/permisos/`.
 
@@ -138,12 +138,13 @@ La cascada se ejecuta en una transacción y es idempotente:
 - Al borrar un `PlanEntrenamiento` se eliminan físicamente sus filas de ejercicios. Al borrar un `PlanAlimentacion` se desactivan sus comidas; los registros de comida se conservan como historial.
 
 - `POST /api/v1/login/` (público), `POST /api/v1/logout/` y `GET /api/v1/me/`
-- `GET /api/v1/resumen/` (indicadores del panel) y `GET /api/v1/conteos/` (total por recurso para los distintivos del menú, calculado con el mismo alcance y borrado lógico que cada listado)
+- `GET /api/v1/resumen/` (indicadores del panel, incluido `visitas_semana` y `asistencia_abierta` del cliente) y `GET /api/v1/conteos/` (total por recurso para los distintivos del menú, calculado con el mismo alcance y borrado lógico que cada listado)
 
 - `/api/v1/roles/`, `/api/v1/permisos/`, `/api/v1/roles-permisos/`, `/api/v1/usuarios/`, `/api/v1/usuarios-roles/`
 - `GET|PUT /api/v1/roles/{id}/permisos/` y `GET|PATCH /api/v1/usuarios/{id}/roles/`
 - `/api/v1/clientes/`, `/api/v1/entrenadores/`, `/api/v1/terapeutas/`, `/api/v1/recepcionistas/`, `/api/v1/administradores/`
 - `/api/v1/asignaciones-cliente-entrenador/`, `/api/v1/clientes-terapeutas/`, `/api/v1/asistencias/`, `/api/v1/entrenamientos/`
+- `POST /api/v1/asistencias/registrar-entrada/` y `POST /api/v1/asistencias/registrar-salida/` (el cliente autenticado marca su llegada o salida con la hora del servidor; no requieren `asistencias:create` y no duplican una entrada que siga abierta)
 - `/api/v1/ejercicios/`, `/api/v1/planes-entrenamiento/`, `/api/v1/planes-entrenamiento-ejercicios/`
 - `/api/v1/planes-alimentacion/`, `/api/v1/comidas/`, `/api/v1/registros-comida/`, `/api/v1/notificaciones/`
 - `/api/v1/auditoria/` (solo lectura, administradores)

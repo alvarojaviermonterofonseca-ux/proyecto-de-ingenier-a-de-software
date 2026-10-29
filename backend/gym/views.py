@@ -108,10 +108,6 @@ def usuarios_con_rol(rol):
     ).distinct()
 
 
-def revocar_sesiones_de_rol(rol):
-    Sesion.objects.filter(usuario__in=usuarios_con_rol(rol)).delete()
-
-
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -343,6 +339,49 @@ class ResumenView(APIView):
             hour=0, minute=0, second=0, microsecond=0
         )
         fin_dia = inicio_dia + timedelta(days=1)
+        inicio_semana = inicio_dia - timedelta(days=inicio_dia.weekday())
+
+        # El cliente ve su propio historial aunque su rol no tenga
+        # ``asistencias:view``: el alcance ya lo limita a su perfil.
+        puede_ver_asistencias = es_cliente or self._puede("asistencias:view")
+        entradas_semana = (
+            list(
+                asistencias.filter(entrada_at__gte=inicio_semana).values_list(
+                    "entrada_at", flat=True
+                )
+            )
+            if puede_ver_asistencias
+            else []
+        )
+        dias_semana = []
+        for desplazamiento, etiqueta in enumerate(
+            ("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
+        ):
+            fecha = (inicio_semana + timedelta(days=desplazamiento)).date()
+            dias_semana.append(
+                {
+                    "fecha": fecha.isoformat(),
+                    "etiqueta": etiqueta,
+                    "total": sum(
+                        1
+                        for entrada in entradas_semana
+                        if timezone.localtime(entrada).date() == fecha
+                    ),
+                }
+            )
+
+        asistencia_abierta = None
+        if es_cliente:
+            abierta = (
+                asistencias.filter(salida_at__isnull=True)
+                .order_by("-entrada_at", "-pk")
+                .first()
+            )
+            if abierta is not None:
+                asistencia_abierta = {
+                    "id": abierta.pk,
+                    "entrada_at": abierta.entrada_at,
+                }
 
         metricas = {
             "usuarios_activos": usuarios.filter(is_active=True, deleted_at__isnull=True).count(),
@@ -412,6 +451,8 @@ class ResumenView(APIView):
                 if self._puede("notificaciones:view")
                 else 0
             ),
+            "visitas_semana": len(entradas_semana),
+            "visitas_semana_dias": dias_semana,
         }
 
         contexto = {"request": request}
@@ -446,6 +487,7 @@ class ResumenView(APIView):
                 "rol_principal": rol,
                 "es_cliente": es_cliente,
                 "metricas": metricas,
+                "asistencia_abierta": asistencia_abierta,
                 "asistencias_recientes": asistencias_recientes,
                 "notificaciones_recientes": notificaciones_recientes,
                 "actividad_reciente": actividad_reciente,
@@ -720,7 +762,6 @@ class RolViewSet(ViewSetBase):
                         if permiso.pk not in existentes
                     ]
                 )
-                revocar_sesiones_de_rol(rol)
                 registrar_evento(
                     request,
                     "actualizar-permisos",
@@ -771,7 +812,6 @@ class RolPermisoViewSet(ViewSetBase):
     def perform_create(self, serializer):
         with transaction.atomic():
             asignacion = serializer.save()
-            revocar_sesiones_de_rol(asignacion.rol)
             self.registrar_evento(
                 "asignar-permiso",
                 asignacion.rol,
@@ -781,7 +821,6 @@ class RolPermisoViewSet(ViewSetBase):
     def perform_update(self, serializer):
         with transaction.atomic():
             asignacion = serializer.save()
-            revocar_sesiones_de_rol(asignacion.rol)
             self.registrar_evento(
                 "actualizar-permiso-rol",
                 asignacion.rol,
@@ -793,7 +832,6 @@ class RolPermisoViewSet(ViewSetBase):
             rol = instance.rol
             permiso = instance.permiso.codigo
             super().perform_destroy(instance)
-            revocar_sesiones_de_rol(rol)
             self.registrar_evento(
                 "revocar-permiso", rol, detalles={"permiso": permiso}
             )
@@ -925,7 +963,11 @@ class UsuarioViewSet(ViewSetBase):
                     if rol_id not in deseados and asignacion.activo:
                         asignacion.activo = False
                         asignacion.save(update_fields=["activo", "updated_at"])
-                Sesion.objects.filter(usuario=usuario).delete()
+                sesiones = Sesion.objects.filter(usuario=usuario)
+                sesion_actual = request.auth if isinstance(request.auth, Sesion) else None
+                if sesion_actual is not None:
+                    sesiones = sesiones.exclude(pk=sesion_actual.pk)
+                sesiones.delete()
                 registrar_evento(
                     request,
                     "actualizar-roles",
@@ -1193,6 +1235,146 @@ class AsistenciaViewSet(ViewSetBase):
 
     def validar_escritura(self, serializer):
         self.validar_cliente_relacionado(serializer, operativo=True)
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: OpenApiResponse(description="El cliente ya tenía una entrada abierta."),
+            201: AsistenciaSerializer,
+        },
+        description=(
+            "Registra la llegada del cliente autenticado con la hora del servidor. "
+            "No requiere el permiso asistencias:create y no duplica una entrada "
+            "que siga abierta."
+        ),
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="registrar-entrada",
+        permission_classes=[IsAuthenticated],
+    )
+    def registrar_entrada(self, request):
+        """Marca la llegada del propio cliente, sin pedirle datos ni hora."""
+        cliente = self._cliente_propio(request)
+
+        with transaction.atomic():
+            # Serializa dos pulsaciones simultáneas del mismo cliente.
+            cliente = Cliente.objects.select_for_update().get(pk=cliente.pk)
+            abierta = (
+                Asistencia.objects.filter(
+                    cliente=cliente,
+                    salida_at__isnull=True,
+                    is_active=True,
+                    deleted_at__isnull=True,
+                )
+                .order_by("-entrada_at", "-pk")
+                .first()
+            )
+            if abierta is not None:
+                return Response(
+                    {
+                        "creado": False,
+                        "mensaje": "Ya tienes una entrada abierta.",
+                        "asistencia": AsistenciaSerializer(
+                            abierta, context={"request": request}
+                        ).data,
+                    }
+                )
+
+            asistencia = Asistencia(
+                cliente=cliente,
+                entrada_at=timezone.now(),
+                metodo_entrada=Asistencia.MetodoEntrada.MANUAL,
+            )
+            try:
+                asistencia.full_clean()
+            except DjangoValidationError as error:
+                raise ValidationError(error.message_dict) from error
+            asistencia.save()
+            registrar_evento(
+                request, "registrar-entrada", "asistencias", asistencia
+            )
+
+        return Response(
+            {
+                "creado": True,
+                "mensaje": "Llegada registrada.",
+                "asistencia": AsistenciaSerializer(
+                    asistencia, context={"request": request}
+                ).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        request=None,
+        responses={200: AsistenciaSerializer},
+        description=(
+            "Cierra la entrada abierta del cliente autenticado con la hora del "
+            "servidor, para que pueda volver a marcar su llegada."
+        ),
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="registrar-salida",
+        permission_classes=[IsAuthenticated],
+    )
+    def registrar_salida(self, request):
+        """Marca la salida del propio cliente."""
+        cliente = self._cliente_propio(request)
+
+        with transaction.atomic():
+            abierta = (
+                Asistencia.objects.select_for_update()
+                .filter(
+                    cliente_id=cliente.pk,
+                    salida_at__isnull=True,
+                    is_active=True,
+                    deleted_at__isnull=True,
+                )
+                .order_by("-entrada_at", "-pk")
+                .first()
+            )
+            if abierta is None:
+                raise ValidationError(
+                    {"asistencia": "No tienes una entrada abierta que cerrar."}
+                )
+            abierta.salida_at = timezone.now()
+            try:
+                abierta.full_clean()
+            except DjangoValidationError as error:
+                raise ValidationError(error.message_dict) from error
+            abierta.save(update_fields=["salida_at", "updated_at"])
+            registrar_evento(
+                request, "registrar-salida", "asistencias", abierta
+            )
+
+        return Response(
+            {
+                "mensaje": "Salida registrada.",
+                "asistencia": AsistenciaSerializer(
+                    abierta, context={"request": request}
+                ).data,
+            }
+        )
+
+    def _cliente_propio(self, request):
+        usuario = request.user
+        cliente = getattr(usuario, "cliente", None) if isinstance(usuario, Usuario) else None
+        if cliente is None:
+            raise ValidationError(
+                {
+                    "cliente": (
+                        "Solo una cuenta con perfil de cliente puede registrar "
+                        "su propia entrada o salida."
+                    )
+                }
+            )
+        if not cliente.is_active or cliente.deleted_at is not None:
+            raise ValidationError({"cliente": "Tu perfil de cliente está inactivo."})
+        return cliente
 
 
 class EntrenamientoViewSet(ViewSetBase):

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { ApiClient } from '../../core/api/api-client.service';
@@ -58,7 +58,11 @@ export class FoodRecordsPage implements OnInit {
   protected readonly localPhotoPreview = signal<string | null>(null);
   protected readonly existingPhotoUrl = signal<string | null>(null);
   protected readonly photoUrls = signal<Record<number, string>>({});
+  protected readonly cameraOpen = signal(false);
+  protected readonly cameraError = signal<string | null>(null);
 
+  private readonly cameraVideo = viewChild<ElementRef<HTMLVideoElement>>('cameraVideo');
+  private stream: MediaStream | null = null;
   private readonly photoObjectUrls = new Map<number, string>();
 
   protected readonly isClient = computed(() => this.auth.roleName() === 'cliente');
@@ -101,6 +105,7 @@ export class FoodRecordsPage implements OnInit {
 
   constructor() {
     this.destroyRef.onDestroy(() => {
+      this.stopCamera();
       this.revokeLocalPreview();
       this.revokePhotos();
     });
@@ -150,6 +155,8 @@ export class FoodRecordsPage implements OnInit {
     this.formError.set(null);
     this.selectedPhoto.set(null);
     this.revokeLocalPreview();
+    this.stopCamera();
+    this.cameraError.set(null);
     this.existingPhotoUrl.set(null);
     const defaultClient = this.isClient() && current ? current.id : 0;
     this.formClient.set(defaultClient);
@@ -170,6 +177,8 @@ export class FoodRecordsPage implements OnInit {
     this.formError.set(null);
     this.selectedPhoto.set(null);
     this.revokeLocalPreview();
+    this.stopCamera();
+    this.cameraError.set(null);
     this.formClient.set(record.cliente);
     this.form.reset({
       cliente: record.cliente,
@@ -186,6 +195,8 @@ export class FoodRecordsPage implements OnInit {
 
   protected closeModal(): void {
     if (!this.saving()) {
+      this.stopCamera();
+      this.cameraError.set(null);
       this.form.controls.cliente.enable();
       this.modalOpen.set(false);
       this.selectedPhoto.set(null);
@@ -205,16 +216,100 @@ export class FoodRecordsPage implements OnInit {
 
   protected onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    this.revokeLocalPreview();
-    this.selectedPhoto.set(file);
-    this.localPhotoPreview.set(file ? URL.createObjectURL(file) : null);
+    this.setPhoto(input.files?.[0] ?? null);
   }
 
   protected clearPhoto(input: HTMLInputElement): void {
     input.value = '';
-    this.selectedPhoto.set(null);
+    this.setPhoto(null);
+  }
+
+  /** Abre la cámara del dispositivo (trasera si existe) con vista previa en vivo. */
+  protected async startCamera(): Promise<void> {
+    this.cameraError.set(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.cameraError.set(
+        'Este navegador no permite usar la cámara aquí. Usa "Elegir archivo" o abre la app en localhost/HTTPS.',
+      );
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 960 },
+        },
+        audio: false,
+      });
+      // El modal pudo cerrarse mientras el navegador pedía permiso.
+      if (!this.modalOpen()) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      this.stopCamera();
+      this.stream = stream;
+      this.cameraOpen.set(true);
+      // El <video> aparece en el siguiente ciclo; se enlaza cuando ya existe.
+      setTimeout(() => {
+        const video = this.cameraVideo()?.nativeElement;
+        if (!video) return;
+        video.srcObject = stream;
+        void video.play().catch(() => undefined);
+      });
+    } catch {
+      this.cameraError.set(
+        'No se pudo abrir la cámara. Revisa el permiso del navegador para este sitio o usa "Elegir archivo".',
+      );
+    }
+  }
+
+  /** Toma una foto del video en vivo y la deja lista para subirla. */
+  protected capturePhoto(): void {
+    const video = this.cameraVideo()?.nativeElement;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      this.cameraError.set('La cámara aún se está preparando. Intenta de nuevo.');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      this.cameraError.set('No se pudo procesar la imagen de la cámara.');
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          this.cameraError.set('No se pudo capturar la foto. Intenta de nuevo.');
+          return;
+        }
+        const file = new File([blob], `comida-${Date.now()}.jpg`, {
+          type: 'image/jpeg',
+        });
+        this.setPhoto(file);
+        this.stopCamera();
+      },
+      'image/jpeg',
+      0.9,
+    );
+  }
+
+  protected stopCamera(): void {
+    for (const track of this.stream?.getTracks() ?? []) track.stop();
+    this.stream = null;
+    const video = this.cameraVideo()?.nativeElement;
+    if (video) video.srcObject = null;
+    this.cameraOpen.set(false);
+  }
+
+  private setPhoto(file: File | null): void {
     this.revokeLocalPreview();
+    this.selectedPhoto.set(file);
+    this.localPhotoPreview.set(file ? URL.createObjectURL(file) : null);
+    if (file) this.cameraError.set(null);
   }
 
   protected save(): void {
@@ -247,6 +342,7 @@ export class FoodRecordsPage implements OnInit {
     request.subscribe({
       next: () => {
         this.saving.set(false);
+        this.stopCamera();
         this.form.controls.cliente.enable();
         this.modalOpen.set(false);
         this.selectedPhoto.set(null);

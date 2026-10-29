@@ -34,6 +34,64 @@
     </div>
   </section>
 
+  @if (summary()?.es_cliente) {
+    <section class="checkin" aria-label="Mi asistencia">
+      <div class="checkin__copy">
+        <span class="checkin__eyebrow">Mi asistencia</span>
+        <h2>
+          {{ visitasSemana() }}
+          {{ visitasSemana() === 1 ? 'visita' : 'visitas' }} esta semana
+        </h2>
+        <p class="checkin__week-label">{{ semanaLabel() }}</p>
+        @if (asistenciaAbierta(); as abierta) {
+          <p class="checkin__status">
+            <app-icon name="check" [size]="15" />
+            Estás en el gimnasio desde las {{ horaDe(abierta.entrada_at) }}
+          </p>
+        } @else {
+          <p class="checkin__status checkin__status--idle">
+            Aún no marcas tu llegada hoy. El botón usa la hora del servidor.
+          </p>
+        }
+      </div>
+
+      <div class="checkin__days" aria-label="Visitas por día de la semana">
+        @for (dia of diasSemana(); track dia.fecha) {
+          <div
+            class="checkin__day"
+            [class.checkin__day--on]="dia.total > 0"
+            [title]="dia.fecha + ': ' + dia.total + ' visitas'"
+          >
+            <span class="checkin__dot">{{ dia.total }}</span>
+            <small>{{ dia.etiqueta }}</small>
+          </div>
+        }
+      </div>
+
+      @if (asistenciaAbierta()) {
+        <button
+          class="button button--secondary checkin__button"
+          type="button"
+          (click)="registrarSalida()"
+          [disabled]="checkingOut()"
+        >
+          <app-icon name="clock" [size]="17" />
+          {{ checkingOut() ? 'Cerrando...' : 'Marcar salida' }}
+        </button>
+      } @else {
+        <button
+          class="button button--primary checkin__button"
+          type="button"
+          (click)="registrarLlegada()"
+          [disabled]="checkingIn()"
+        >
+          <app-icon name="clock" [size]="17" />
+          {{ checkingIn() ? 'Registrando...' : 'Registrar mi llegada' }}
+        </button>
+      }
+    </section>
+  }
+
   @if (error()) {
     <div class="notice notice--error" role="alert">
       <app-icon name="alert" [size]="18" />

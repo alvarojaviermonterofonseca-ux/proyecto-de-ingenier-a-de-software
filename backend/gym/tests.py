@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 import os
 from pathlib import Path
@@ -13,6 +13,7 @@ from django.core.management import call_command
 from django.db import connection
 from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from PIL import Image
 from rest_framework.test import APITestCase
 
@@ -724,6 +725,125 @@ class GymApiTests(APITestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(set(respuesta.data["permisos"]), {"clientes:view", "clientes:export"})
         self.assertEqual(RolPermiso.objects.filter(rol=cliente).count(), 2)
+
+    def test_guardar_permisos_conserva_sesiones_y_aplica_al_instante(self):
+        """Cambiar permisos no debe expulsar a nadie: se leen en cada petición."""
+        self.crear_cliente()
+        cliente_usuario = Usuario.objects.get(correo="ana@example.com")
+        token_cliente, sesion_cliente = Sesion.crear_para_usuario(cliente_usuario)
+
+        self.autenticar()
+        token_admin = self._token_operador
+        rol_cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+
+        respuesta = self.client.put(
+            f"/api/v1/roles/{rol_cliente.pk}/permisos/",
+            {"permisos": ["clientes:view", "roles:view"]},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+
+        # La sesión del administrador que guardó sigue viva.
+        self.assertEqual(self.client.get("/api/v1/me/").status_code, 200)
+        self.assertTrue(
+            Sesion.objects.filter(token_hash=Sesion.hash_token(token_admin)).exists()
+        )
+
+        # La del cliente también: el cambio se refleja sin volver a iniciar sesión.
+        self.assertTrue(Sesion.objects.filter(pk=sesion_cliente.pk).exists())
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_cliente}")
+        perfil = self.client.get("/api/v1/me/")
+        self.assertEqual(perfil.status_code, 200)
+        self.assertIn("roles:view", perfil.data["permisos_efectivos"])
+        self.assertEqual(self.client.get("/api/v1/roles/").status_code, 200)
+
+    def test_registrar_entrada_marca_la_llegada_del_cliente_autenticado(self):
+        self.crear_cliente()
+        cliente_usuario = Usuario.objects.get(correo="ana@example.com")
+        token, _ = Sesion.crear_para_usuario(cliente_usuario)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertFalse(cliente_usuario.tiene_permiso("asistencias:create"))
+
+        respuesta = self.client.post(
+            "/api/v1/asistencias/registrar-entrada/", {}, format="json"
+        )
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertTrue(respuesta.data["creado"])
+        asistencia = Asistencia.objects.get(cliente_id=cliente_usuario.pk)
+        self.assertEqual(asistencia.metodo_entrada, Asistencia.MetodoEntrada.MANUAL)
+        self.assertIsNone(asistencia.salida_at)
+        self.assertLessEqual(
+            abs((asistencia.entrada_at - timezone.now()).total_seconds()), 5
+        )
+
+        # Pulsar de nuevo no duplica la entrada abierta.
+        repetida = self.client.post(
+            "/api/v1/asistencias/registrar-entrada/", {}, format="json"
+        )
+        self.assertEqual(repetida.status_code, 200, repetida.data)
+        self.assertFalse(repetida.data["creado"])
+        self.assertEqual(repetida.data["asistencia"]["id"], asistencia.pk)
+        self.assertEqual(Asistencia.objects.filter(cliente_id=cliente_usuario.pk).count(), 1)
+
+        # La visita de la semana anterior no cuenta en el acumulado.
+        Asistencia.objects.create(
+            cliente_id=cliente_usuario.pk,
+            entrada_at=timezone.now() - timedelta(days=8),
+            salida_at=timezone.now() - timedelta(days=8, hours=-1),
+            metodo_entrada=Asistencia.MetodoEntrada.MANUAL,
+        )
+        resumen = self.client.get("/api/v1/resumen/")
+        self.assertEqual(resumen.status_code, 200)
+        self.assertTrue(resumen.data["es_cliente"])
+        self.assertEqual(resumen.data["metricas"]["visitas_semana"], 1)
+        self.assertEqual(len(resumen.data["metricas"]["visitas_semana_dias"]), 7)
+        self.assertEqual(
+            resumen.data["asistencia_abierta"]["id"],
+            asistencia.pk,
+        )
+
+    def test_registrar_salida_cierra_la_entrada_y_permite_volver(self):
+        self.crear_cliente()
+        cliente_usuario = Usuario.objects.get(correo="ana@example.com")
+        token, _ = Sesion.crear_para_usuario(cliente_usuario)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        entrada = self.client.post(
+            "/api/v1/asistencias/registrar-entrada/", {}, format="json"
+        )
+        self.assertEqual(entrada.status_code, 201, entrada.data)
+
+        salida = self.client.post(
+            "/api/v1/asistencias/registrar-salida/", {}, format="json"
+        )
+        self.assertEqual(salida.status_code, 200, salida.data)
+        asistencia = Asistencia.objects.get(pk=entrada.data["asistencia"]["id"])
+        self.assertIsNotNone(asistencia.salida_at)
+        self.assertGreaterEqual(asistencia.salida_at, asistencia.entrada_at)
+
+        repetida = self.client.post(
+            "/api/v1/asistencias/registrar-salida/", {}, format="json"
+        )
+        self.assertEqual(repetida.status_code, 400)
+
+        nueva = self.client.post(
+            "/api/v1/asistencias/registrar-entrada/", {}, format="json"
+        )
+        self.assertEqual(nueva.status_code, 201, nueva.data)
+        self.assertNotEqual(nueva.data["asistencia"]["id"], asistencia.pk)
+        self.assertEqual(
+            Asistencia.objects.filter(cliente_id=cliente_usuario.pk).count(), 2
+        )
+
+    def test_registrar_entrada_rechaza_cuentas_sin_perfil_de_cliente(self):
+        self.autenticar()
+
+        respuesta = self.client.post(
+            "/api/v1/asistencias/registrar-entrada/", {}, format="json"
+        )
+
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("cliente", respuesta.data["error"]["detalles"])
 
     def test_usuario_puede_recibir_roles_adicionales_y_permisos(self):
         self.autenticar()

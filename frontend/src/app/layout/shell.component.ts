@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { filter } from 'rxjs';
+import { filter, fromEvent } from 'rxjs';
 
 import { ApiClient } from '../core/api/api-client.service';
 import type { ResourceCounts } from '../core/api/api.models';
@@ -76,6 +76,16 @@ export class ShellComponent {
         this.updateTitle();
         this.sidebarOpen.set(false);
         // Los totales se recalculan al navegar para reflejar altas y bajas.
+        this.loadCounts();
+      });
+
+    // Al volver a la pestaña se refrescan permisos y conteos: si un
+    // administrador cambió el rol, el menú se ajusta sin recargar la página.
+    fromEvent(window, 'focus')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (!this.auth.authenticated()) return;
+        this.auth.refresh().subscribe({ error: () => undefined });
         this.loadCounts();
       });
   }

@@ -6,6 +6,7 @@ import { ApiError } from '../../core/api/api-error';
 import type { Summary } from '../../core/api/api.models';
 import { AuthService } from '../../core/auth/auth.service';
 import { roleLabel } from '../../core/rbac/permissions';
+import { ToastService } from '../../core/ui/toast.service';
 import { formatDateTime, humanize, relativeDate } from '../../core/utils/format';
 import { EmptyStateComponent } from '../../shared/empty-state.component';
 import { IconComponent } from '../../shared/icon.component';
@@ -28,6 +29,12 @@ interface QuickAction {
   adminOnly?: boolean;
 }
 
+interface CheckInResponse {
+  creado?: boolean;
+  mensaje: string;
+  asistencia: { id: number; entrada_at: string; salida_at?: string | null };
+}
+
 @Component({
   selector: 'app-dashboard-page',
   standalone: true,
@@ -43,11 +50,29 @@ interface QuickAction {
 })
 export class DashboardPage implements OnInit {
   private readonly api = inject(ApiClient);
+  private readonly toast = inject(ToastService);
   protected readonly auth = inject(AuthService);
 
   protected readonly summary = signal<Summary | null>(null);
   protected readonly loading = signal(true);
   protected readonly error = signal<string | null>(null);
+  protected readonly checkingIn = signal(false);
+  protected readonly checkingOut = signal(false);
+
+  protected readonly visitasSemana = computed(
+    () => this.summary()?.metricas.visitas_semana ?? 0,
+  );
+  protected readonly diasSemana = computed(
+    () => this.summary()?.metricas.visitas_semana_dias ?? [],
+  );
+  protected readonly asistenciaAbierta = computed(
+    () => this.summary()?.asistencia_abierta ?? null,
+  );
+  protected readonly semanaLabel = computed(() => {
+    const dias = this.diasSemana();
+    if (dias.length === 0) return '';
+    return `Semana del ${this.diaCorto(dias[0].fecha)} al ${this.diaCorto(dias[dias.length - 1].fecha)}`;
+  });
 
   protected readonly greeting = computed(() => {
     const hour = new Date().getHours();
@@ -143,9 +168,11 @@ export class DashboardPage implements OnInit {
     this.load();
   }
 
-  protected load(): void {
-    this.loading.set(true);
-    this.error.set(null);
+  protected load(silent = false): void {
+    if (!silent) {
+      this.loading.set(true);
+      this.error.set(null);
+    }
     this.api.get<Summary>('resumen/').subscribe({
       next: (summary) => {
         this.summary.set(summary);
@@ -158,6 +185,67 @@ export class DashboardPage implements OnInit {
         );
       },
     });
+  }
+
+  protected registrarLlegada(): void {
+    if (this.checkingIn() || this.asistenciaAbierta()) return;
+    this.checkingIn.set(true);
+    this.api.post<CheckInResponse>('asistencias/registrar-entrada/', {}).subscribe({
+      next: (respuesta) => {
+        this.checkingIn.set(false);
+        const hora = this.horaDe(respuesta.asistencia.entrada_at);
+        this.toast.success(
+          respuesta.creado ? 'Llegada registrada' : 'Ya estabas dentro',
+          respuesta.creado
+            ? `Registramos tu entrada a las ${hora}`
+            : `Tu entrada sigue abierta desde las ${hora}`,
+        );
+        this.load(true);
+      },
+      error: (error: unknown) => {
+        this.checkingIn.set(false);
+        this.toast.error(
+          'No se pudo registrar tu llegada',
+          error instanceof ApiError ? error.message : undefined,
+        );
+      },
+    });
+  }
+
+  protected registrarSalida(): void {
+    if (this.checkingOut() || !this.asistenciaAbierta()) return;
+    this.checkingOut.set(true);
+    this.api.post<CheckInResponse>('asistencias/registrar-salida/', {}).subscribe({
+      next: (respuesta) => {
+        this.checkingOut.set(false);
+        const hora = respuesta.asistencia.salida_at
+          ? this.horaDe(respuesta.asistencia.salida_at)
+          : '';
+        this.toast.success('Salida registrada', `Cerramos tu visita a las ${hora}`);
+        this.load(true);
+      },
+      error: (error: unknown) => {
+        this.checkingOut.set(false);
+        this.toast.error(
+          'No se pudo registrar tu salida',
+          error instanceof ApiError ? error.message : undefined,
+        );
+      },
+    });
+  }
+
+  protected horaDe(valor: string): string {
+    return new Intl.DateTimeFormat('es-CO', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(valor));
+  }
+
+  private diaCorto(iso: string): string {
+    return new Intl.DateTimeFormat('es-CO', {
+      day: 'numeric',
+      month: 'short',
+    }).format(new Date(`${iso}T12:00:00`));
   }
 
   protected notificationTone(estado: string): 'success' | 'danger' | 'warning' | 'info' | 'neutral' {

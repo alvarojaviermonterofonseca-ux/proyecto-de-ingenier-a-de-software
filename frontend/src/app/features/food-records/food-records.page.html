@@ -176,14 +176,35 @@
         </div>
         <div class="field">
           <label for="record-photo">Foto</label>
-          <input
-            #photoInput
-            id="record-photo"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            (change)="onFileSelected($event)"
-          />
-          <small>JPG, PNG o WebP. Máximo 5 MB.</small>
+          <div class="photo-actions">
+            <button
+              class="button button--secondary"
+              type="button"
+              (click)="startCamera()"
+              [disabled]="cameraOpen()"
+            >
+              <app-icon name="camera" [size]="16" />
+              Tomar foto
+            </button>
+            <label class="file-picker">
+              <app-icon name="upload" [size]="16" />
+              Elegir archivo
+              <input
+                #photoInput
+                id="record-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                (change)="onFileSelected($event)"
+              />
+            </label>
+          </div>
+          <small>
+            JPG, PNG o WebP. Máximo 5 MB. En el celular "Tomar foto" abre la cámara.
+          </small>
+          @if (cameraError()) {
+            <p class="camera-error" role="alert">{{ cameraError() }}</p>
+          }
         </div>
         <div class="field field--full">
           <label for="record-observations">Observaciones</label>
@@ -192,19 +213,40 @@
       </div>
 
       <div class="photo-column">
-        <span class="photo-column__label">Vista previa</span>
-        @if (localPhotoPreview() ?? existingPhotoUrl(); as preview) {
-          <img class="photo-preview" [src]="preview" alt="Vista previa de la foto" />
-          @if (selectedPhoto()) {
-            <button class="link-button" type="button" (click)="clearPhoto(photoInput)">
-              Quitar selección
+        <span class="photo-column__label">
+          {{ cameraOpen() ? 'Cámara en vivo' : 'Vista previa' }}
+        </span>
+        @if (cameraOpen()) {
+          <video
+            #cameraVideo
+            class="photo-preview"
+            autoplay
+            playsinline
+            muted
+          ></video>
+          <div class="camera-actions">
+            <button class="button button--primary" type="button" (click)="capturePhoto()">
+              <app-icon name="camera" [size]="16" />
+              Capturar
             </button>
-          }
-        } @else {
-          <div class="photo-preview photo-preview--empty">
-            <app-icon name="camera" [size]="28" />
-            <span>Sin foto seleccionada</span>
+            <button class="button button--secondary" type="button" (click)="stopCamera()">
+              Cancelar
+            </button>
           </div>
+        } @else {
+          @if (localPhotoPreview() ?? existingPhotoUrl(); as preview) {
+            <img class="photo-preview" [src]="preview" alt="Vista previa de la foto" />
+            @if (selectedPhoto()) {
+              <button class="link-button" type="button" (click)="clearPhoto(photoInput)">
+                Quitar selección
+              </button>
+            }
+          } @else {
+            <div class="photo-preview photo-preview--empty">
+              <app-icon name="camera" [size]="28" />
+              <span>Sin foto seleccionada</span>
+            </div>
+          }
         }
       </div>
     </div>

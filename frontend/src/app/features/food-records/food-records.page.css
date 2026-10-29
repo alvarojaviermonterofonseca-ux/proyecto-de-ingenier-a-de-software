@@ -184,6 +184,51 @@
   font-size: 0.72rem;
 }
 
+.photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.file-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  color: var(--gc-ink);
+  background: var(--gc-surface);
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.file-picker:hover {
+  border-color: var(--gc-primary);
+}
+
+.file-picker input {
+  display: none;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.camera-actions .button {
+  flex: 1;
+  justify-content: center;
+}
+
+.camera-error {
+  margin: 0.35rem 0 0;
+  color: #b3261e;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 .review-box {
   margin-top: 1rem;
   padding: 0.9rem;

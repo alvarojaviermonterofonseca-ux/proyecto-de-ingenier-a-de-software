@@ -425,6 +425,17 @@ export interface AuditEvent {
   created_at: string;
 }
 
+export interface WeeklyVisitDay {
+  fecha: string;
+  etiqueta: string;
+  total: number;
+}
+
+export interface OpenAttendance {
+  id: number;
+  entrada_at: string;
+}
+
 export interface SummaryMetrics {
   usuarios_activos: number;
   clientes_activos: number;
@@ -437,12 +448,15 @@ export interface SummaryMetrics {
   planes_alimentacion_activos: number;
   registros_comida_pendientes: number;
   notificaciones_pendientes: number;
+  visitas_semana: number;
+  visitas_semana_dias: WeeklyVisitDay[];
 }
 
 export interface Summary {
   rol_principal: string;
   es_cliente: boolean;
   metricas: SummaryMetrics;
+  asistencia_abierta: OpenAttendance | null;
   asistencias_recientes: Attendance[];
   notificaciones_recientes: Notification[];
   actividad_reciente: AuditEvent[];
