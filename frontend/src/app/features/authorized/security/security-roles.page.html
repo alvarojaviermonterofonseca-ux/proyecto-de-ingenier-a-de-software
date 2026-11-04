@@ -2,6 +2,12 @@
   title="Roles y permisos"
   subtitle="Cada rol define qué puede ver, crear, editar, eliminar y exportar en el sistema."
 >
+  @if (canAssignRoles()) {
+    <button class="button button--secondary" type="button" (click)="openAssignRoles()">
+      <app-icon name="shield" [size]="17" />
+      Asignar roles a usuario
+    </button>
+  }
   @if (canCreate()) {
     <button class="button button--primary" type="button" (click)="openCreate()">
       <app-icon name="plus" [size]="17" />
@@ -66,17 +72,29 @@
           <h2>{{ roleLabel(role.nombre) }}</h2>
           <p>{{ role.descripcion || 'Sin descripción' }}</p>
         </div>
-        @if (canDelete()) {
-          <button
-            class="link-button link-button--danger"
-            type="button"
-            [disabled]="isProtected(role)"
-            [attr.title]="isProtected(role) ? 'Rol protegido por el sistema' : null"
-            (click)="remove(role)"
-          >
-            Eliminar rol
-          </button>
-        }
+        <div class="editor__head-actions">
+          @if (canAssignRoles()) {
+            <button
+              class="button button--secondary button--sm"
+              type="button"
+              (click)="openAssignThisRole(role)"
+            >
+              <app-icon name="user-plus" [size]="15" />
+              Asignar a usuarios
+            </button>
+          }
+          @if (canDelete()) {
+            <button
+              class="link-button link-button--danger"
+              type="button"
+              [disabled]="isProtected(role)"
+              [attr.title]="isProtected(role) ? 'Rol protegido por el sistema' : null"
+              (click)="remove(role)"
+            >
+              Eliminar rol
+            </button>
+          }
+        </div>
       </header>
 
       <div class="editor__toolbar">
@@ -190,6 +208,7 @@
   </section>
 </div>
 
+<!-- Modal: Nuevo rol -->
 <app-modal
   [open]="editor() === 'create'"
   title="Nuevo rol"
@@ -220,4 +239,72 @@
       </button>
     </div>
   </form>
+</app-modal>
+
+<!-- Modal: Roles adicionales (Asignar a usuarios) -->
+<app-modal
+  [open]="editor() === 'roles'"
+  title="Roles adicionales"
+  subtitle="Suman permisos al rol principal. El rol principal siempre queda asignado."
+  (closed)="closeEditor()"
+>
+  @if (formError()) {
+    <div class="notice notice--error">{{ formError() }}</div>
+  }
+
+  <div class="field" style="margin-bottom: 1.25rem;">
+    <label for="assign-user-select" style="display: block; margin-bottom: 0.4rem; font-weight: 500;">
+      Seleccionar usuario
+    </label>
+    <select
+      id="assign-user-select"
+      class="field-input"
+      style="width: 100%; padding: 0.6rem 0.75rem;"
+      [value]="selectedUser()?.id ?? ''"
+      (change)="selectUserForAssignment($any($event.target).value)"
+    >
+      <option value="" disabled [selected]="!selectedUser()">Elige un usuario del sistema…</option>
+      @for (u of users(); track u.id) {
+        <option [value]="u.id">
+          {{ u.nombre }} ({{ u.correo }}) — Rol principal: {{ roleLabel(u.rol_detalle.nombre) }}
+        </option>
+      }
+    </select>
+  </div>
+
+  @if (selectedUser(); as user) {
+    <ul class="role-checklist">
+      @for (role of activeRoles(); track role.id) {
+        <li>
+          <label [class.is-locked]="role.id === user.rol">
+            <input
+              type="checkbox"
+              [checked]="role.id === user.rol || isRoleDraftSelected(role.id)"
+              [disabled]="role.id === user.rol"
+              (change)="toggleRoleDraft(role.id, $any($event.target).checked)"
+            />
+            <span class="role-info">
+              <strong>{{ roleLabel(role.nombre) }}</strong>
+              <small>{{ role.descripcion || 'Sin descripción' }} · {{ role.permisos.length }} permisos</small>
+            </span>
+            @if (role.id === user.rol) {
+              <span class="tag tag--muted">Principal</span>
+            }
+          </label>
+        </li>
+      }
+    </ul>
+  }
+
+  <div class="form-actions">
+    <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+    <button
+      class="button button--primary"
+      type="button"
+      (click)="saveUserRoles()"
+      [disabled]="saving() || !selectedUser()"
+    >
+      {{ saving() ? 'Guardando…' : 'Guardar roles' }}
+    </button>
+  </div>
 </app-modal>

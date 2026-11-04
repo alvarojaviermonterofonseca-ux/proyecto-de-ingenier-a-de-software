@@ -22,17 +22,16 @@ ACCION_POR_METODO = {
 def es_administrador(user):
     """Indica si el usuario puede administrar identidad, roles y permisos.
 
-    El rol principal ``administrador`` del modelo propio y el personal de
-    Django son las únicas identidades con control total. Los roles
-    personalizados nunca se consideran administradores, aunque reciban
-    permisos RBAC.
+    Basta con que el usuario tenga el rol ``administrador`` entre sus roles
+    efectivos (principal o adicional). Así, cuando un administrador concede
+    todos los roles a otra cuenta, esa cuenta recibe el mismo control. El
+    personal de Django conserva el acceso de solo lectura/escritura de staff.
     """
     if not user or not getattr(user, "is_authenticated", False):
         return False
     if not isinstance(user, Usuario):
         return bool(getattr(user, "is_staff", False))
-    rol = getattr(user, "rol", None)
-    return bool(rol and rol.nombre == Rol.Nombre.ADMINISTRADOR)
+    return user.roles_efectivos().filter(nombre=Rol.Nombre.ADMINISTRADOR).exists()
 
 
 class TienePermisoRecurso(BasePermission):
@@ -41,9 +40,14 @@ class TienePermisoRecurso(BasePermission):
     mensaje = "No tienes permiso para realizar esta operación."
 
     def _accion(self, request, view):
-        return getattr(view, "accion_permiso", None) or ACCION_POR_METODO.get(
-            request.method, "view"
-        )
+        accion = getattr(view, "accion_permiso", None)
+        if accion:
+            return accion
+        por_accion = getattr(view, "accion_permiso_por_accion", None) or {}
+        accion = por_accion.get(getattr(view, "action", None))
+        if accion:
+            return accion
+        return ACCION_POR_METODO.get(request.method, "view")
 
     def has_permission(self, request, view):
         user = getattr(request, "user", None)

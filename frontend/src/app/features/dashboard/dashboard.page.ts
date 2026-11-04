@@ -290,6 +290,11 @@ export class DashboardPage implements OnInit {
       'Planes de entrenamiento': 'planes-entrenamiento:view',
       Notificaciones: 'notificaciones:view',
     };
-    return this.auth.hasPermission(map[label]);
+    const permission = map[label];
+    // Si no hay mapeo, mostrar por defecto (no ocultar métricas nuevas accidentalmente)
+    if (!permission) {
+      return true;
+    }
+    return this.auth.hasPermission(permission);
   }
 }

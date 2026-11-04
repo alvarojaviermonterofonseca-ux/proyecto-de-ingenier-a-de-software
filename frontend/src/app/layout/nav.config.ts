@@ -52,7 +52,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         route: '/autorizados/seguridad/asignaciones',
         icon: 'target',
         permission: 'usuarios:view',
-        adminOnly: true,
         counts: ['usuarios-roles'],
       },
       {

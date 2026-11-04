@@ -28,6 +28,7 @@ const ICONS: Record<string, readonly string[]> = {
   bell: ['M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M10 21h4'],
   history: ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5', 'M12 7v5l4 2'],
   logout: ['M9 21H5V3h4', 'M16 17l5-5-5-5', 'M21 12H9'],
+  'log-in': ['M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4', 'M10 17 15 12 10 7', 'M15 17H3'],
   menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
   close: ['M18 6 6 18', 'M6 6l12 12'],
   search: ['M21 21l-4.35-4.35', 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16'],

@@ -65,8 +65,8 @@ export class ShellComponent {
   protected readonly role = computed(() => roleLabel(this.auth.roleName()));
 
   constructor() {
-    this.updateTitle();
     this.loadCounts();
+    // Esperar al primer NavigationEnd para tener el snapshot completo del router
     this.router.events
       .pipe(
         filter((event): event is NavigationEnd => event instanceof NavigationEnd),
@@ -78,6 +78,9 @@ export class ShellComponent {
         // Los totales se recalculan al navegar para reflejar altas y bajas.
         this.loadCounts();
       });
+
+    // Título inicial: esperar microtask para que el router tenga el estado inicial
+    Promise.resolve().then(() => this.updateTitle());
 
     // Al volver a la pestaña se refrescan permisos y conteos: si un
     // administrador cambió el rol, el menú se ajusta sin recargar la página.
@@ -126,6 +129,16 @@ export class ShellComponent {
         this.auth.clearSession();
         void this.router.navigate(['/login']);
       },
+    });
+  }
+
+  protected async refreshPermissions(): Promise<void> {
+    this.auth.refresh().subscribe({
+      next: () => {
+        this.toast.success('Permisos actualizados', 'Los cambios de rol ya están activos.');
+        this.loadCounts();
+      },
+      error: () => this.toast.error('No se pudieron actualizar los permisos'),
     });
   }
 

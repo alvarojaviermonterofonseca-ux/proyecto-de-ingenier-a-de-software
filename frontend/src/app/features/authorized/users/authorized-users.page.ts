@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { debounceTime, distinctUntilChanged } from 'rxjs';
 
 import { ApiClient } from '../../../core/api/api-client.service';
@@ -26,6 +27,7 @@ type Editor = 'create' | 'identity' | 'roles' | null;
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    RouterLink,
     AvatarComponent,
     EmptyStateComponent,
     IconComponent,

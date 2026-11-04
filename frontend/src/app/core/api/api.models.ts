@@ -83,6 +83,7 @@ export interface UserDetail {
 export interface CurrentUser extends UserDetail {
   roles_efectivos: Role[];
   permisos_efectivos: string[];
+  es_administrador: boolean;
 }
 
 export interface LoginResponse {
@@ -296,11 +297,21 @@ export interface TrainingPlan {
   updated_at: string;
 }
 
+export type WeekDay =
+  | 'lunes'
+  | 'martes'
+  | 'miercoles'
+  | 'jueves'
+  | 'viernes'
+  | 'sabado'
+  | 'domingo';
+
 export interface TrainingPlanExercise {
   id: number;
   plan: number;
   ejercicio: number;
   ejercicio_detalle: Exercise;
+  dia_semana: WeekDay;
   orden: number;
   series: number | null;
   repeticiones: number | null;

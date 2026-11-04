@@ -29,11 +29,27 @@ cargar_env(BASE_DIR / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-cambie-esta-clave-en-produccion")
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
+# El valor seguro por defecto es ``False``: en local se activa con
+# DJANGO_DEBUG=true en backend/.env.
+DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# La clave insegura solo se acepta en desarrollo. Con DEBUG desactivado la
+# aplicación se niega a arrancar sin DJANGO_SECRET_KEY para evitar desplegar
+# con el secreto de ejemplo.
+_CLAVE_INSEGURA_DESARROLLO = "django-insecure-cambie-esta-clave-en-produccion"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY no está definido. Genera una clave con "
+            'python -c "from django.core.management.utils import '
+            'get_random_secret_key as k; print(k())" y guárdala en '
+            "backend/.env (o en la variable de entorno) antes de ejecutar "
+            "con DJANGO_DEBUG=false."
+        )
+    SECRET_KEY = _CLAVE_INSEGURA_DESARROLLO
 
 ALLOWED_HOSTS = [
     host
@@ -94,7 +110,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # SQLite permite arrancar sin infraestructura adicional.  Para usar el motor
 # de gym_control_pro.sql, exporte DB_ENGINE=mysql y las variables DB_*.
-if os.getenv("DB_ENGINE", "sqlite").lower() == "mysql":
+# En tests se usa SQLite automáticamente para evitar problemas de permisos.
+if os.getenv("DB_ENGINE", "sqlite").lower() == "mysql" and not os.getenv("TESTING"):
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.mysql",
@@ -182,6 +199,18 @@ _cors_origins = [origin for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").spli
 CORS_ALLOW_ALL_ORIGINS = DEBUG and not _cors_origins
 CORS_ALLOWED_ORIGINS = _cors_origins
 
+# Endurecimiento HTTPS opcional. Se activa de forma explícita con
+# DJANGO_SECURE_SSL_REDIRECT=true para no romper instalaciones que aún se
+# sirven por HTTP en una red local. En producción con TLS (o un proxy que
+# reenvíe X-Forwarded-Proto) conviene activarlo.
+if not DEBUG and os.getenv("DJANGO_SECURE_SSL_REDIRECT", "false").lower() == "true":
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+
 REST_FRAMEWORK = {
     # La API usa tokens Bearer propios porque ``Usuario`` no hereda del modelo
     # User de Django.  La autenticación se aplica a todas las vistas salvo las
@@ -223,6 +252,11 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    # El esquema documenta la versión canónica; el alias /api/ se mantiene por
+    # compatibilidad y sus rutas conservan el prefijo "api_" para que los
+    # operationId no choquen con los de /api/v1/.
+    "SCHEMA_PATH_PREFIX": "/api/v1",
+    "POSTPROCESSING_HOOKS": ["config.schema.desambiguar_operation_ids"],
 }
 
 # Duración de cada sesión emitida al iniciar sesión.  Puede ajustarse sin
@@ -232,9 +266,28 @@ AUTH_TOKEN_TTL_HOURS = int(os.getenv("AUTH_TOKEN_TTL_HOURS", "8"))
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
+#
+# En desarrollo los correos se imprimen en la consola. Fuera de DEBUG se usa
+# SMTP por defecto para no desplegar con el backend de consola; puede
+# sobrescribirse con EMAIL_BACKEND y las variables SMTP habituales.
 MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    "default": {
+        "BACKEND": os.getenv(
+            "EMAIL_BACKEND",
+            "django.core.mail.backends.console.EmailBackend"
+            if DEBUG
+            else "django.core.mail.backends.smtp.EmailBackend",
+        ),
+        # Django 6 recibe las opciones del backend dentro de ``OPTIONS``; los
+        # antiguos EMAIL_HOST/EMAIL_PORT ya no se admiten junto a MAILERS.
+        "OPTIONS": {
+            "host": os.getenv("EMAIL_HOST", "localhost"),
+            "port": int(os.getenv("EMAIL_PORT", "25")),
+            "username": os.getenv("EMAIL_HOST_USER", ""),
+            "password": os.getenv("EMAIL_HOST_PASSWORD", ""),
+            "use_tls": os.getenv("EMAIL_USE_TLS", "true").lower() == "true",
+        },
     },
 }
+
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@gymcontrol.local")

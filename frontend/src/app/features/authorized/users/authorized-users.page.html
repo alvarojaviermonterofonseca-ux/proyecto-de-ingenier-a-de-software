@@ -2,10 +2,12 @@
   title="Usuarios"
   subtitle="Cuentas del sistema con su rol principal, roles adicionales y permisos efectivos."
 >
-  <button class="button button--primary" type="button" (click)="openCreate()">
-    <app-icon name="user-plus" [size]="17" />
-    Nuevo usuario
-  </button>
+  @if (auth.isAdmin()) {
+    <button class="button button--primary" type="button" (click)="openCreate()">
+      <app-icon name="user-plus" [size]="17" />
+      Nuevo usuario
+    </button>
+  }
 </app-page-header>
 
 <div class="toolbar">
@@ -190,10 +192,12 @@
               <app-icon name="edit" [size]="15" />
               Editar
             </button>
-            <button class="button button--secondary button--sm" type="button" (click)="openRoles()">
-              <app-icon name="shield" [size]="15" />
-              Roles
-            </button>
+            @if (auth.isAdmin() || auth.hasPermission('roles:edit')) {
+              <a class="button button--secondary button--sm" routerLink="/autorizados/seguridad/roles">
+                <app-icon name="shield" [size]="15" />
+                Roles
+              </a>
+            }
             @if (user.is_active) {
               <button class="button button--ghost button--sm" type="button" (click)="toggleActive()">
                 Desactivar
@@ -439,44 +443,4 @@
       </button>
     </div>
   </form>
-</app-modal>
-
-<app-modal
-  [open]="editor() === 'roles'"
-  title="Roles adicionales"
-  subtitle="Suman permisos al rol principal. El rol principal siempre queda asignado."
-  (closed)="closeEditor()"
->
-  @if (formError()) {
-    <div class="notice notice--error">{{ formError() }}</div>
-  }
-  @if (detail(); as user) {
-    <ul class="role-checklist">
-      @for (role of activeRoles(); track role.id) {
-        <li>
-          <label [class.is-locked]="role.id === user.rol">
-            <input
-              type="checkbox"
-              [checked]="role.id === user.rol || isRoleSelected(role.id)"
-              [disabled]="role.id === user.rol"
-              (change)="toggleRole(role.id, $any($event.target).checked)"
-            />
-            <span>
-              <strong>{{ roleLabel(role.nombre) }}</strong>
-              <small>{{ role.descripcion || 'Sin descripción' }} · {{ role.permisos.length }} permisos</small>
-            </span>
-            @if (role.id === user.rol) {
-              <span class="tag tag--muted">Principal</span>
-            }
-          </label>
-        </li>
-      }
-    </ul>
-  }
-  <div class="form-actions">
-    <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
-    <button class="button button--primary" type="button" (click)="saveRoles()" [disabled]="saving()">
-      {{ saving() ? 'Guardando…' : 'Guardar roles' }}
-    </button>
-  </div>
 </app-modal>

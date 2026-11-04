@@ -14,10 +14,16 @@ import { IconComponent } from '../../shared/icon.component';
       <span class="state-page__icon"><app-icon name="search" [size]="34" /></span>
       <h1>No encontramos esta página</h1>
       <p>La dirección cambió o el recurso ya no existe. Vuelve al panel para continuar.</p>
-      <a class="button button--primary" routerLink="/inicio">
-        <app-icon name="home" [size]="17" />
-        Volver al inicio
-      </a>
+      <div class="state-page__actions">
+        <a class="button button--primary" routerLink="/inicio">
+          <app-icon name="home" [size]="17" />
+          Volver al inicio
+        </a>
+        <a class="button button--outline" routerLink="/login">
+          <app-icon name="log-in" [size]="17" />
+          Iniciar sesión
+        </a>
+      </div>
     </div>
   `,
   styles: [
@@ -59,6 +65,13 @@ import { IconComponent } from '../../shared/icon.component';
       p {
         margin: 0 0 1.3rem;
         color: var(--gc-muted);
+      }
+      .state-page__actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.55rem;
+        margin-top: 1.4rem;
       }
     `,
   ],

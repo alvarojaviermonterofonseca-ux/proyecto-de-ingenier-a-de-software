@@ -123,6 +123,16 @@
   font-size: 0.84rem;
 }
 
+.exercise-plan-list__muscle {
+  display: inline-block;
+  margin-top: 0.2rem;
+  color: var(--gc-primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .exercise-plan-list p {
   margin: 0.1rem 0 0;
   color: var(--gc-muted);
@@ -135,6 +145,131 @@
   color: var(--gc-muted);
   font-size: 0.72rem;
   font-style: italic;
+}
+
+.routine-week {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.2rem, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+}
+
+.routine-week__day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.55rem 0.35rem;
+  border: 1px solid var(--gc-primary);
+  border-radius: 0.65rem;
+  background: var(--gc-primary-soft);
+  text-align: center;
+}
+
+.routine-week__day span {
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.routine-week__day strong {
+  color: var(--gc-primary);
+  font-size: 1.15rem;
+  line-height: 1.1;
+}
+
+.routine-week__day small {
+  color: var(--gc-muted);
+  font-size: 0.62rem;
+}
+
+.routine-week__day--empty {
+  border-color: var(--gc-border);
+  background: transparent;
+}
+
+.routine-week__day--empty strong {
+  color: var(--gc-muted);
+}
+
+.routine-muscles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.routine-muscles__label {
+  margin-right: 0.2rem;
+  color: var(--gc-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.muscle-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 999px;
+  color: var(--gc-ink-soft);
+  background: var(--gc-surface-2);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.muscle-chip--strong {
+  border-color: transparent;
+  color: var(--gc-primary);
+  background: var(--gc-primary-soft);
+}
+
+.routine-days {
+  display: grid;
+  gap: 0.9rem;
+  margin-bottom: 1.3rem;
+}
+
+.routine-day {
+  padding: 0.8rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.75rem;
+  background: var(--gc-surface);
+}
+
+.routine-day header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.routine-day h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  text-transform: capitalize;
+}
+
+.routine-day header p {
+  margin: 0.1rem 0 0;
+  color: var(--gc-muted);
+  font-size: 0.7rem;
+}
+
+.routine-day__muscles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.routine-day .exercise-plan-list {
+  margin-bottom: 0;
 }
 
 .add-exercise {

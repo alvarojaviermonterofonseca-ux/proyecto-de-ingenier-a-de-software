@@ -52,7 +52,10 @@ export const routes: Routes = [
           },
           {
             path: 'seguridad/roles',
-            data: { title: 'Roles y permisos', permission: 'roles:view' },
+            data: {
+              title: 'Roles y permisos',
+              permission: 'roles:view',
+            },
             loadComponent: () =>
               import('./features/authorized/security/security-roles.page').then(
                 (m) => m.SecurityRolesPage,
@@ -60,7 +63,10 @@ export const routes: Routes = [
           },
           {
             path: 'seguridad/permisos',
-            data: { title: 'Catálogo de permisos', permission: 'permisos:view' },
+            data: {
+              title: 'Catálogo de permisos',
+              permission: 'permisos:view',
+            },
             loadComponent: () =>
               import('./features/authorized/security/security-permissions.page').then(
                 (m) => m.SecurityPermissionsPage,
@@ -71,7 +77,6 @@ export const routes: Routes = [
             data: {
               title: 'Asignaciones de rol',
               permission: 'usuarios:view',
-              adminOnly: true,
             },
             loadComponent: () =>
               import('./features/authorized/security/security-assignments.page').then(

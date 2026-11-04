@@ -3,7 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { ApiClient } from '../../../core/api/api-client.service';
 import { ApiError } from '../../../core/api/api-error';
-import type { Role } from '../../../core/api/api.models';
+import type { Role, UserDetail } from '../../../core/api/api.models';
 import { AuthService } from '../../../core/auth/auth.service';
 import {
   PermissionCatalogService,
@@ -46,6 +46,7 @@ export class SecurityRolesPage implements OnInit {
   protected readonly roleLabel = roleLabel;
 
   protected readonly roles = signal<Role[]>([]);
+  protected readonly users = signal<UserDetail[]>([]);
   protected readonly selectedId = signal<number | null>(null);
   protected readonly draft = signal<ReadonlySet<string>>(new Set());
   protected readonly query = signal('');
@@ -54,13 +55,21 @@ export class SecurityRolesPage implements OnInit {
   protected readonly saving = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly formError = signal<string | null>(null);
-  protected readonly editor = signal<'create' | null>(null);
+  protected readonly editor = signal<'create' | 'roles' | null>(null);
+
+  protected readonly selectedUser = signal<UserDetail | null>(null);
+  protected readonly roleDraft = signal<Set<number>>(new Set());
+
+  protected readonly activeRoles = computed(() => this.roles().filter((role) => role.is_active));
 
   protected readonly canEditPermissions = computed(
-    () => this.auth.isAdmin() && this.auth.hasPermission('roles:edit'),
+    () => this.auth.isAdmin() || this.auth.hasPermission('roles:edit'),
   );
-  protected readonly canCreate = computed(() => this.auth.hasPermission('roles:create'));
-  protected readonly canDelete = computed(() => this.auth.hasPermission('roles:delete'));
+  protected readonly canCreate = computed(() => this.auth.isAdmin() || this.auth.hasPermission('roles:create'));
+  protected readonly canDelete = computed(() => this.auth.isAdmin() || this.auth.hasPermission('roles:delete'));
+  protected readonly canAssignRoles = computed(
+    () => this.auth.isAdmin() || this.auth.hasPermission('roles:edit') || this.auth.hasPermission('usuarios:edit'),
+  );
 
   protected readonly form = this.formBuilder.nonNullable.group({
     nombre: ['', [Validators.required, Validators.maxLength(50)]],
@@ -112,6 +121,7 @@ export class SecurityRolesPage implements OnInit {
 
   ngOnInit(): void {
     this.load(true);
+    this.loadUsers();
     this.catalog.load().subscribe();
   }
 
@@ -137,6 +147,13 @@ export class SecurityRolesPage implements OnInit {
           error instanceof ApiError ? error.message : 'No se pudieron cargar los roles.',
         );
       },
+    });
+  }
+
+  protected loadUsers(): void {
+    this.api.getAll<UserDetail>('usuarios/').subscribe({
+      next: (users) => this.users.set(users),
+      error: () => this.users.set([]),
     });
   }
 
@@ -224,8 +241,6 @@ export class SecurityRolesPage implements OnInit {
             'Permisos guardados',
             'El menú y los accesos se actualizan sin cerrar la sesión.',
           );
-          // Refresca los permisos del usuario actual para que el menú lateral
-          // refleje el cambio de inmediato.
           this.auth.refresh().subscribe({ error: () => undefined });
           this.load();
         },
@@ -309,5 +324,91 @@ export class SecurityRolesPage implements OnInit {
 
   protected isProtected(role: Role): boolean {
     return role.nombre === 'administrador';
+  }
+
+  // --- Asignación de roles a usuarios ---
+
+  protected openAssignRoles(user?: UserDetail): void {
+    this.formError.set(null);
+    if (user) {
+      this.selectedUser.set(user);
+      this.roleDraft.set(new Set((user.roles_detalle ?? []).map((r) => r.id)));
+    } else {
+      const first = this.users()[0] ?? null;
+      this.selectedUser.set(first);
+      this.roleDraft.set(first ? new Set((first.roles_detalle ?? []).map((r) => r.id)) : new Set());
+    }
+    this.editor.set('roles');
+  }
+
+  protected openAssignThisRole(role: Role): void {
+    this.formError.set(null);
+    const first = this.users()[0] ?? null;
+    this.selectedUser.set(first);
+    if (first) {
+      const set = new Set((first.roles_detalle ?? []).map((r) => r.id));
+      set.add(role.id);
+      this.roleDraft.set(set);
+    } else {
+      this.roleDraft.set(new Set([role.id]));
+    }
+    this.editor.set('roles');
+  }
+
+  protected selectUserForAssignment(userIdStr: string): void {
+    const id = Number(userIdStr);
+    const user = this.users().find((u) => u.id === id) ?? null;
+    this.selectedUser.set(user);
+    if (user) {
+      this.roleDraft.set(new Set((user.roles_detalle ?? []).map((r) => r.id)));
+    } else {
+      this.roleDraft.set(new Set());
+    }
+  }
+
+  protected toggleRoleDraft(roleId: number, checked: boolean): void {
+    this.roleDraft.update((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(roleId);
+      } else {
+        next.delete(roleId);
+      }
+      return next;
+    });
+  }
+
+  protected isRoleDraftSelected(roleId: number): boolean {
+    return this.roleDraft().has(roleId);
+  }
+
+  protected saveUserRoles(): void {
+    const user = this.selectedUser();
+    if (!user) return;
+
+    this.saving.set(true);
+    this.formError.set(null);
+    const roleIds = [...this.roleDraft()];
+
+    this.api
+      .patch<UserDetail>(`usuarios/${user.id}/roles/`, { roles: roleIds })
+      .subscribe({
+        next: (updated) => {
+          this.saving.set(false);
+          this.editor.set(null);
+          this.users.update((list) => list.map((u) => (u.id === updated.id ? updated : u)));
+          this.load();
+          this.toast.success(
+            'Roles actualizados',
+            `Se actualizaron los roles de ${user.nombre}. Las sesiones se renovaron.`,
+          );
+        },
+        error: (error: unknown) => {
+          this.saving.set(false);
+          this.formError.set(
+            error instanceof ApiError ? error.message : 'No se pudieron asignar los roles.',
+          );
+        },
+      });
   }
 }

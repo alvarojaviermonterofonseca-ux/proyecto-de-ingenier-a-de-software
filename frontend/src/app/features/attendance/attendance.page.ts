@@ -7,6 +7,12 @@ import { ApiClient } from '../../core/api/api-client.service';
 import { ApiError } from '../../core/api/api-error';
 import type { Attendance, ClientProfile } from '../../core/api/api.models';
 import { AuthService } from '../../core/auth/auth.service';
+
+interface CheckInResponse {
+  creado?: boolean;
+  mensaje: string;
+  asistencia: Attendance;
+}
 import { ConfirmService } from '../../core/ui/confirm.service';
 import { ToastService } from '../../core/ui/toast.service';
 import {
@@ -94,10 +100,42 @@ export class AttendancePage implements OnInit {
     identificador_evento: [''],
   });
 
+  protected readonly selectedClientId = signal<number>(0);
+
+  protected readonly selectedClientOpenAttendance = computed(() => {
+    const clientId = this.selectedClientId();
+    if (!clientId) return null;
+    return this.records().find((r) => r.cliente === clientId && !r.salida_at) ?? null;
+  });
+
+  protected readonly checking = signal(false);
+
+  protected readonly myOpenAttendance = computed(() => {
+    const user = this.auth.user();
+    if (!user) return null;
+    return (
+      this.records().find(
+        (r) => (r.cliente === user.id || r.cliente_detalle?.correo === user.correo) && !r.salida_at,
+      ) ?? null
+    );
+  });
+
   ngOnInit(): void {
+    this.form.controls.cliente.valueChanges.subscribe((val) => {
+      this.selectedClientId.set(Number(val) || 0);
+    });
     this.load();
     this.api.getAll<ClientProfile>('clientes/', { is_active: true }).subscribe({
-      next: (clients) => this.clients.set(clients),
+      next: (clients) => {
+        this.clients.set(clients);
+        if (clients.length > 0 && (!this.form.controls.cliente.value || this.form.controls.cliente.value === 0)) {
+          const currentUserId = this.auth.user()?.id;
+          const match = clients.find((c) => c.usuario === currentUserId);
+          const chosen = match ? match.usuario : clients[0].usuario;
+          this.form.controls.cliente.setValue(chosen);
+          this.selectedClientId.set(chosen);
+        }
+      },
       error: () => this.clients.set([]),
     });
     if (
@@ -138,13 +176,19 @@ export class AttendancePage implements OnInit {
   protected openCreate(): void {
     this.editing.set(null);
     this.formError.set(null);
+
+    const currentUserId = this.auth.user()?.id;
+    const clientMatch = this.clients().find((c) => c.usuario === currentUserId);
+    const defaultClient = clientMatch ? clientMatch.usuario : (this.clients()[0]?.usuario ?? 0);
+
     this.form.reset({
-      cliente: 0,
+      cliente: defaultClient,
       metodo_entrada: 'manual',
       entrada_at: dateTimeInput(new Date().toISOString()),
       salida_at: '',
-      identificador_evento: '',
+      identificador_evento: `REG-${Date.now().toString().slice(-6)}`,
     });
+    this.selectedClientId.set(defaultClient);
     this.form.controls.cliente.enable();
     this.form.controls.metodo_entrada.enable();
     this.modalOpen.set(true);
@@ -157,12 +201,38 @@ export class AttendancePage implements OnInit {
       cliente: record.cliente,
       metodo_entrada: record.metodo_entrada,
       entrada_at: dateTimeInput(record.entrada_at),
-      salida_at: dateTimeInput(record.salida_at),
+      salida_at: record.salida_at ? dateTimeInput(record.salida_at) : dateTimeInput(new Date().toISOString()),
       identificador_evento: record.identificador_evento ?? '',
     });
+    this.selectedClientId.set(record.cliente);
     this.form.controls.cliente.disable();
     this.form.controls.metodo_entrada.disable();
     this.modalOpen.set(true);
+  }
+
+  protected saveOrCheckout(): void {
+    const openRecord = !this.editing() ? this.selectedClientOpenAttendance() : null;
+    if (openRecord) {
+      this.checkout(openRecord);
+      this.closeModal();
+      return;
+    }
+    this.save();
+  }
+
+  protected setCurrentEntrada(): void {
+    this.form.controls.entrada_at.setValue(dateTimeInput(new Date().toISOString()));
+  }
+
+  protected setCurrentSalida(): void {
+    this.form.controls.salida_at.setValue(dateTimeInput(new Date().toISOString()));
+  }
+
+  protected setSalidaOffset(hours: number): void {
+    const entradaVal = this.form.controls.entrada_at.value;
+    const baseDate = entradaVal ? new Date(entradaVal) : new Date();
+    baseDate.setHours(baseDate.getHours() + hours);
+    this.form.controls.salida_at.setValue(dateTimeInput(baseDate.toISOString()));
   }
 
   protected closeModal(): void {
@@ -217,17 +287,107 @@ export class AttendancePage implements OnInit {
   }
 
   protected checkout(record: Attendance): void {
+    if (this.checking()) return;
+    this.checking.set(true);
+
+    const user = this.auth.user();
+    const isMine = user?.id === record.cliente || user?.correo === record.cliente_detalle?.correo;
+    if (isMine || this.auth.roleName() === 'cliente') {
+      this.api.post<CheckInResponse>('asistencias/registrar-salida/', {}).subscribe({
+        next: (res) => {
+          this.checking.set(false);
+          const hora = res.asistencia.salida_at ? this.formatTime(res.asistencia.salida_at) : '';
+          this.toast.success('Salida registrada', `Visita cerrada a las ${hora}`);
+          this.load();
+        },
+        error: (error: unknown) => {
+          this.checking.set(false);
+          this.toast.error(
+            'No se pudo registrar la salida',
+            error instanceof ApiError ? error.message : undefined,
+          );
+        },
+      });
+      return;
+    }
+
     this.api
       .patch<Attendance>(`asistencias/${record.id}/`, { salida_at: new Date().toISOString() })
       .subscribe({
         next: () => {
+          this.checking.set(false);
           this.toast.success('Salida registrada', record.cliente_detalle.nombre);
           this.load();
         },
         error: (error: unknown) => {
-          this.toast.error('No se pudo registrar la salida', error instanceof ApiError ? error.message : undefined);
+          this.checking.set(false);
+          this.toast.error(
+            'No se pudo registrar la salida',
+            error instanceof ApiError ? error.message : undefined,
+          );
         },
       });
+  }
+
+  protected toggleQuickAttendance(): void {
+    if (this.checking()) return;
+    const openRecord = this.myOpenAttendance();
+
+    if (openRecord) {
+      this.checkout(openRecord);
+      return;
+    }
+
+    // Registrar entrada directamente con 1 toque sin abrir ventana
+    this.checking.set(true);
+    if (this.auth.roleName() === 'cliente' || !this.auth.hasPermission('asistencias:create')) {
+      this.api.post<CheckInResponse>('asistencias/registrar-entrada/', {}).subscribe({
+        next: (res) => {
+          this.checking.set(false);
+          const hora = this.formatTime(res.asistencia.entrada_at);
+          this.toast.success(
+            res.creado ? 'Llegada registrada' : 'Ya estabas dentro',
+            `Registramos tu entrada a las ${hora}`,
+          );
+          this.load();
+        },
+        error: (error: unknown) => {
+          this.checking.set(false);
+          this.toast.error(
+            'No se pudo registrar la entrada',
+            error instanceof ApiError ? error.message : undefined,
+          );
+        },
+      });
+    } else {
+      const defaultClient = this.clients()[0]?.usuario;
+      if (!defaultClient) {
+        this.checking.set(false);
+        this.openCreate();
+        return;
+      }
+      this.api
+        .post<Attendance>('asistencias/', {
+          cliente: defaultClient,
+          entrada_at: new Date().toISOString(),
+          metodo_entrada: 'manual',
+        })
+        .subscribe({
+          next: (res) => {
+            this.checking.set(false);
+            const hora = this.formatTime(res.entrada_at);
+            this.toast.success('Entrada registrada', `Ingreso a las ${hora}`);
+            this.load();
+          },
+          error: (error: unknown) => {
+            this.checking.set(false);
+            this.toast.error(
+              'No se pudo registrar la entrada',
+              error instanceof ApiError ? error.message : undefined,
+            );
+          },
+        });
+    }
   }
 
   protected async remove(record: Attendance): Promise<void> {

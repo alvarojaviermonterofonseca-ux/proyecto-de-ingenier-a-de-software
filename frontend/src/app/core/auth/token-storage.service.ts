@@ -4,24 +4,40 @@ const TOKEN_KEY = 'gym_control_token';
 const EXPIRY_KEY = 'gym_control_token_expiry';
 const SESSION_EVENT = 'gym-control-session-expired';
 
+function getStorage(): Storage | null {
+  try {
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class TokenStorage {
   get token(): string | null {
-    return sessionStorage.getItem(TOKEN_KEY);
+    const storage = getStorage();
+    return storage?.getItem(TOKEN_KEY) ?? null;
   }
 
   get expiry(): string | null {
-    return sessionStorage.getItem(EXPIRY_KEY);
+    const storage = getStorage();
+    return storage?.getItem(EXPIRY_KEY) ?? null;
   }
 
   save(token: string, expiry: string): void {
-    sessionStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.setItem(EXPIRY_KEY, expiry);
+    const storage = getStorage();
+    if (storage) {
+      storage.setItem(TOKEN_KEY, token);
+      storage.setItem(EXPIRY_KEY, expiry);
+    }
   }
 
   clear(): void {
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(EXPIRY_KEY);
+    const storage = getStorage();
+    if (storage) {
+      storage.removeItem(TOKEN_KEY);
+      storage.removeItem(EXPIRY_KEY);
+    }
   }
 
   isExpired(): boolean {

@@ -9,6 +9,7 @@ import type {
   TrainerProfile,
   TrainingPlan,
   TrainingPlanExercise,
+  WeekDay,
 } from '../../core/api/api.models';
 import { AuthService } from '../../core/auth/auth.service';
 import { ConfirmService } from '../../core/ui/confirm.service';
@@ -38,6 +39,15 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
   styleUrl: './training-plans.page.css',
 })
 export class TrainingPlansPage implements OnInit {
+  protected readonly weekDays: readonly { value: WeekDay; label: string }[] = [
+    { value: 'lunes', label: 'Lunes' },
+    { value: 'martes', label: 'Martes' },
+    { value: 'miercoles', label: 'Miércoles' },
+    { value: 'jueves', label: 'Jueves' },
+    { value: 'viernes', label: 'Viernes' },
+    { value: 'sabado', label: 'Sábado' },
+    { value: 'domingo', label: 'Domingo' },
+  ];
   private readonly api = inject(ApiClient);
   private readonly formBuilder = inject(FormBuilder);
   private readonly confirm = inject(ConfirmService);
@@ -74,6 +84,35 @@ export class TrainingPlansPage implements OnInit {
     );
   });
 
+  protected readonly weeklyRoutine = computed(() => {
+    const rows = this.planExercises();
+    return this.weekDays.map((day) => {
+      const dayRows = rows
+        .filter((row) => row.dia_semana === day.value)
+        .sort((a, b) => a.orden - b.orden);
+      const musculos = [
+        ...new Set(
+          dayRows
+            .map((row) => row.ejercicio_detalle.grupo_muscular)
+            .filter((musculo): musculo is string => Boolean(musculo)),
+        ),
+      ];
+      return { ...day, rows: dayRows, musculos };
+    });
+  });
+
+  protected readonly routineDays = computed(() =>
+    this.weeklyRoutine().filter((day) => day.rows.length > 0),
+  );
+
+  protected readonly routineMuscles = computed(() => [
+    ...new Set(
+      this.planExercises()
+        .map((row) => row.ejercicio_detalle.grupo_muscular)
+        .filter((musculo): musculo is string => Boolean(musculo)),
+    ),
+  ]);
+
   protected readonly form = this.formBuilder.nonNullable.group({
     cliente: [0, [Validators.required]],
     entrenador: [0, [Validators.required]],
@@ -87,6 +126,7 @@ export class TrainingPlansPage implements OnInit {
 
   protected readonly exerciseForm = this.formBuilder.nonNullable.group({
     ejercicio: [0, [Validators.required]],
+    dia_semana: ['lunes' as WeekDay, [Validators.required]],
     orden: [1, [Validators.required, Validators.min(1)]],
     series: [3],
     repeticiones: [10],
@@ -105,10 +145,12 @@ export class TrainingPlansPage implements OnInit {
       next: (trainers) => this.trainers.set(trainers),
       error: () => this.trainers.set([]),
     });
-    this.api.getAll<Exercise>('ejercicios/').subscribe({
-      next: (exercises) => this.exercises.set(exercises),
-      error: () => this.exercises.set([]),
-    });
+    if (this.canManageExercises()) {
+      this.api.getAll<Exercise>('ejercicios/').subscribe({
+        next: (exercises) => this.exercises.set(exercises),
+        error: () => this.exercises.set([]),
+      });
+    }
   }
 
   protected load(): void {
@@ -227,6 +269,7 @@ export class TrainingPlansPage implements OnInit {
     this.exerciseError.set(null);
     this.exerciseForm.reset({
       ejercicio: 0,
+      dia_semana: 'lunes',
       orden: 1,
       series: 3,
       repeticiones: 10,
@@ -249,16 +292,30 @@ export class TrainingPlansPage implements OnInit {
     this.exerciseLoading.set(true);
     this.api.getAll<TrainingPlanExercise>('planes-entrenamiento-ejercicios/', { plan: planId }).subscribe({
       next: (rows) => {
-        this.planExercises.set(rows.sort((a, b) => a.orden - b.orden));
+        const orderDay = (dia: WeekDay) => this.weekDays.findIndex((day) => day.value === dia);
+        this.planExercises.set(
+          [...rows].sort(
+            (a, b) => orderDay(a.dia_semana) - orderDay(b.dia_semana) || a.orden - b.orden,
+          ),
+        );
         this.exerciseLoading.set(false);
-        const nextOrder = rows.length > 0 ? Math.max(...rows.map((row) => row.orden)) + 1 : 1;
-        this.exerciseForm.controls.orden.setValue(nextOrder);
+        this.updateNextOrder(this.exerciseForm.controls.dia_semana.value);
       },
       error: (error: unknown) => {
         this.exerciseLoading.set(false);
         this.exerciseError.set(error instanceof ApiError ? error.message : 'No se pudieron cargar los ejercicios.');
       },
     });
+  }
+
+  protected onDayChange(): void {
+    this.updateNextOrder(this.exerciseForm.controls.dia_semana.value);
+  }
+
+  private updateNextOrder(dia: WeekDay): void {
+    const rows = this.planExercises().filter((row) => row.dia_semana === dia);
+    const nextOrder = rows.length > 0 ? Math.max(...rows.map((row) => row.orden)) + 1 : 1;
+    this.exerciseForm.controls.orden.setValue(nextOrder);
   }
 
   protected addExercise(): void {
@@ -271,6 +328,7 @@ export class TrainingPlansPage implements OnInit {
     const payload = {
       plan: plan.id,
       ejercicio: raw.ejercicio,
+      dia_semana: raw.dia_semana,
       orden: raw.orden,
       series: raw.series || null,
       repeticiones: raw.repeticiones || null,
@@ -298,7 +356,7 @@ export class TrainingPlansPage implements OnInit {
   protected async removeExercise(row: TrainingPlanExercise): Promise<void> {
     const accepted = await this.confirm.confirm({
       title: 'Quitar ejercicio',
-      message: `Se quitará ${row.ejercicio_detalle.nombre} del plan.`,
+      message: `Se quitará ${row.ejercicio_detalle.nombre} del ${this.dayLabel(row.dia_semana)}.`,
       confirmLabel: 'Quitar',
     });
     if (!accepted) return;
@@ -328,6 +386,10 @@ export class TrainingPlansPage implements OnInit {
     if (row.peso_kg) parts.push(`${row.peso_kg} kg`);
     if (row.descanso_segundos) parts.push(`${row.descanso_segundos}s descanso`);
     return parts.join(' · ') || 'Sin prescripción';
+  }
+
+  protected dayLabel(dia: WeekDay): string {
+    return this.weekDays.find((day) => day.value === dia)?.label ?? dia;
   }
 
   protected formatDate = formatDate;

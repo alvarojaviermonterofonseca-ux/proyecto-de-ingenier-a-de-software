@@ -10,9 +10,13 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import FieldDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.urls import reverse
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException
+
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 
 from .models import (
     Administrador,
@@ -44,6 +48,29 @@ from .permissions import es_administrador
 
 class SerializerVacio(serializers.Serializer):
     pass
+
+
+class RolResumenSerializer(serializers.Serializer):
+    """Resumen ``id``/``nombre`` usado en los esquemas de roles efectivos."""
+
+    id = serializers.IntegerField(read_only=True)
+    nombre = serializers.CharField(read_only=True)
+
+
+class PermisosRolPayloadSerializer(serializers.Serializer):
+    """Cuerpo de ``PUT /roles/{id}/permisos/``."""
+
+    permisos = serializers.ListField(
+        child=serializers.CharField(), allow_empty=True
+    )
+
+
+class RolesUsuarioPayloadSerializer(serializers.Serializer):
+    """Cuerpo de ``PATCH|PUT /usuarios/{id}/roles/``."""
+
+    roles = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), allow_empty=True
+    )
 
 
 class LoginFailed(APIException):
@@ -130,10 +157,33 @@ class PermisoSerializer(ModeloValidadoSerializer):
         )
         read_only_fields = ("id", "codigo", "created_at", "updated_at")
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        recurso = (
+            attrs.get("recurso")
+            or (self.instance.recurso if self.instance is not None else "")
+        )
+        recurso = (recurso or "").strip().lower()
+        # El catálogo solo admite recursos que tienen un ViewSet registrado.
+        from .resources import RECURSOS_API
+
+        permitidos = set(RECURSOS_API)
+        if recurso and recurso not in permitidos:
+            raise serializers.ValidationError(
+                {
+                    "recurso": (
+                        "El recurso no está registrado en la API. Crea primero "
+                        "su ViewSet y vuelve a intentarlo."
+                    )
+                }
+            )
+        return attrs
+
 
 class RolSerializer(ModeloValidadoSerializer):
     permisos = serializers.SerializerMethodField()
     permisos_detalle = serializers.SerializerMethodField()
+    recursos = serializers.SerializerMethodField()
     total_usuarios = serializers.SerializerMethodField()
 
     class Meta:
@@ -147,6 +197,7 @@ class RolSerializer(ModeloValidadoSerializer):
             "updated_at",
             "permisos",
             "permisos_detalle",
+            "recursos",
             "total_usuarios",
         )
         read_only_fields = (
@@ -155,19 +206,31 @@ class RolSerializer(ModeloValidadoSerializer):
             "updated_at",
             "permisos",
             "permisos_detalle",
+            "recursos",
             "total_usuarios",
         )
 
+    @extend_schema_field({"type": "array", "items": {"type": "string"}})
     def get_permisos(self, rol):
         return sorted(
             rol.permisos_asignados.filter(permiso__is_active=True).values_list("permiso__codigo", flat=True)
         )
 
+    @extend_schema_field(PermisoSerializer(many=True))
     def get_permisos_detalle(self, rol):
         permisos = [asignacion.permiso for asignacion in rol.permisos_asignados.all() if asignacion.permiso.is_active]
         permisos.sort(key=lambda permiso: permiso.codigo)
         return PermisoSerializer(permisos, many=True).data
 
+    @extend_schema_field({"type": "array", "items": {"type": "string"}})
+    def get_recursos(self, rol):
+        return sorted(
+            asignacion.recurso.nombre
+            for asignacion in rol.recursos_asignados.all()
+            if asignacion.recurso.is_active
+        )
+
+    @extend_schema_field(OpenApiTypes.INT)
     def get_total_usuarios(self, rol):
         return rol.asignaciones_usuarios.filter(activo=True).values("usuario_id").distinct().count()
 
@@ -553,6 +616,7 @@ PERFIL_RESUMEN_SERIALIZERS = {
 }
 
 
+@extend_schema_field(OpenApiTypes.OBJECT)
 class PerfilPorRolField(serializers.Field):
     """Valida ``perfil`` con el serializer del rol indicado en la misma entrada."""
 
@@ -688,19 +752,32 @@ def validar_modelo(candidato):
         raise serializers.ValidationError(error.message_dict) from error
 
 
-def existe_otro_administrador_activo(usuario):
-    return (
-        Usuario.objects.filter(
-            rol__nombre=Rol.Nombre.ADMINISTRADOR,
-            is_active=True,
-            deleted_at__isnull=True,
+def administradores_efectivos_activos(excluir_pk=None):
+    """Cuenta administradores por rol principal o por rol adicional activo."""
+
+    queryset = (
+        Usuario.objects.filter(is_active=True, deleted_at__isnull=True)
+        .filter(
+            Q(rol__nombre=Rol.Nombre.ADMINISTRADOR)
+            | Q(
+                asignaciones_usuarios__rol__nombre=Rol.Nombre.ADMINISTRADOR,
+                asignaciones_usuarios__activo=True,
+                asignaciones_usuarios__rol__is_active=True,
+            )
         )
-        .exclude(pk=usuario.pk)
-        .exists()
+        .distinct()
     )
+    if excluir_pk is not None:
+        queryset = queryset.exclude(pk=excluir_pk)
+    return queryset
+
+
+def existe_otro_administrador_activo(usuario):
+    return administradores_efectivos_activos(excluir_pk=usuario.pk).exists()
 
 
 class PerfilResumenMixin:
+    @extend_schema_field({"type": "object", "nullable": True})
     def get_perfil_detalle(self, usuario):
         serializer_clase = PERFIL_RESUMEN_SERIALIZERS.get(usuario.rol.nombre)
         if serializer_clase is None:
@@ -725,6 +802,7 @@ class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
     roles_detalle = serializers.SerializerMethodField(read_only=True)
     permisos = serializers.SerializerMethodField(read_only=True)
     perfil_detalle = serializers.SerializerMethodField(read_only=True)
+    es_administrador = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Usuario
@@ -734,6 +812,7 @@ class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
             "rol_detalle",
             "roles_detalle",
             "permisos",
+            "es_administrador",
             "nombre",
             "username",
             "correo",
@@ -745,13 +824,19 @@ class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(RolSerializer(many=True))
     def get_roles_detalle(self, usuario):
         return RolSerializer(
             usuario.roles_efectivos(), many=True, context=self.context
         ).data
 
+    @extend_schema_field({"type": "array", "items": {"type": "string"}})
     def get_permisos(self, usuario):
         return sorted(usuario.permisos_efectivos())
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_es_administrador(self, usuario):
+        return es_administrador(usuario)
 
 
 class UsuarioListSerializer(PerfilResumenMixin, serializers.ModelSerializer):
@@ -777,6 +862,7 @@ class UsuarioListSerializer(PerfilResumenMixin, serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(RolResumenSerializer(many=True))
     def get_roles_efectivos(self, usuario):
         roles = {}
         for asignacion in usuario.asignaciones_usuarios.all():
@@ -803,9 +889,11 @@ class UsuarioMeSerializer(UsuarioReadSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(RolSerializer(many=True))
     def get_roles_efectivos(self, usuario):
         return self.get_roles_detalle(usuario)
 
+    @extend_schema_field({"type": "array", "items": {"type": "string"}})
     def get_permisos_efectivos(self, usuario):
         return self.get_permisos(usuario)
 
@@ -993,9 +1081,16 @@ class UsuarioUpdateSerializer(
                         }
                     )
 
-        if self.instance.rol.nombre == Rol.Nombre.ADMINISTRADOR:
+        if es_administrador(self.instance):
             activo_nuevo = attrs.get("is_active", self.instance.is_active)
-            sigue_siendo_admin = rol.nombre == Rol.Nombre.ADMINISTRADOR
+            sigue_siendo_admin = (
+                rol.nombre == Rol.Nombre.ADMINISTRADOR
+                or self.instance.asignaciones_usuarios.filter(
+                    rol__nombre=Rol.Nombre.ADMINISTRADOR,
+                    activo=True,
+                    rol__is_active=True,
+                ).exists()
+            )
             if (not sigue_siendo_admin or not activo_nuevo) and not existe_otro_administrador_activo(
                 self.instance
             ):
@@ -1148,7 +1243,7 @@ class PlanEntrenamientoEjercicioSerializer(ModeloValidadoSerializer):
     class Meta:
         model = PlanEntrenamientoEjercicio
         fields = (
-            "id", "plan", "ejercicio", "ejercicio_detalle", "orden", "series", "repeticiones", "peso_kg",
+            "id", "plan", "ejercicio", "ejercicio_detalle", "dia_semana", "orden", "series", "repeticiones", "peso_kg",
             "descanso_segundos", "observaciones", "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
@@ -1218,6 +1313,7 @@ class RegistroComidaSerializer(ModeloValidadoSerializer):
                 )
         return super().validate(attrs)
 
+    @extend_schema_field({"type": "string", "format": "uri", "nullable": True})
     def get_foto_url(self, registro):
         if not registro.foto:
             return None

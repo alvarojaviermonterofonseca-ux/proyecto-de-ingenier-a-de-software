@@ -6,7 +6,11 @@ import { ModuleTabsComponent, type ModuleTab } from '../../shared/module-tabs.co
 
 const TABS: readonly (ModuleTab & { permission: string; adminOnly?: boolean })[] = [
   { label: 'Usuarios', route: '/autorizados/usuarios', permission: 'usuarios:view' },
-  { label: 'Roles y permisos', route: '/autorizados/seguridad/roles', permission: 'roles:view' },
+  {
+    label: 'Roles y permisos',
+    route: '/autorizados/seguridad/roles',
+    permission: 'roles:view',
+  },
   {
     label: 'Catálogo de permisos',
     route: '/autorizados/seguridad/permisos',
@@ -16,7 +20,6 @@ const TABS: readonly (ModuleTab & { permission: string; adminOnly?: boolean })[]
     label: 'Asignaciones',
     route: '/autorizados/seguridad/asignaciones',
     permission: 'usuarios:view',
-    adminOnly: true,
   },
 ];
 

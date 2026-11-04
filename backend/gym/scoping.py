@@ -8,6 +8,18 @@ def rol_principal(user):
     return getattr(getattr(user, "rol", None), "nombre", None)
 
 
+def roles_efectivos_nombres(user):
+    """Nombres de todos los roles activos del usuario (principal y adicionales).
+
+    El alcance de datos se construye con la unión de estos roles, igual que los
+    permisos efectivos. Así, conceder un rol adicional no solo habilita las
+    acciones: también abre los datos que ese rol puede ver.
+    """
+    if not isinstance(user, Usuario) or not user.pk:
+        return set()
+    return set(user.roles_efectivos().values_list("nombre", flat=True))
+
+
 def es_personal_django(user):
     return bool(
         user
@@ -37,20 +49,25 @@ def clientes_clinicos(user):
         return Cliente.objects.all()
     if not isinstance(user, Usuario):
         return Cliente.objects.none()
-    rol = rol_principal(user)
-    if rol == Rol.Nombre.CLIENTE:
-        return Cliente.objects.filter(pk=user.pk)
-    if rol == Rol.Nombre.ENTRENADOR:
-        return _clientes_asignados(user, "asignaciones_entrenador", "entrenador")
-    if rol == Rol.Nombre.TERAPEUTA:
-        return _clientes_asignados(user, "asignaciones_terapeuta", "terapeuta")
-    return Cliente.objects.none()
+    roles = roles_efectivos_nombres(user)
+    permitidos = Cliente.objects.none()
+    if Rol.Nombre.CLIENTE in roles:
+        permitidos |= Cliente.objects.filter(pk=user.pk)
+    if Rol.Nombre.ENTRENADOR in roles:
+        permitidos |= _clientes_asignados(
+            user, "asignaciones_entrenador", "entrenador"
+        )
+    if Rol.Nombre.TERAPEUTA in roles:
+        permitidos |= _clientes_asignados(
+            user, "asignaciones_terapeuta", "terapeuta"
+        )
+    return permitidos.distinct()
 
 
 def clientes_operativos(user):
     if es_administrador(user) or es_personal_django(user):
         return Cliente.objects.all()
-    if rol_principal(user) == Rol.Nombre.RECEPCIONISTA:
+    if Rol.Nombre.RECEPCIONISTA in roles_efectivos_nombres(user):
         return Cliente.objects.all()
     return clientes_clinicos(user)
 
@@ -60,15 +77,16 @@ def usuarios_visibles(user):
         return Usuario.objects.all()
     if not isinstance(user, Usuario):
         return Usuario.objects.none()
-    if rol_principal(user) == Rol.Nombre.RECEPCIONISTA:
-        return Usuario.objects.filter(
+    visibles = Usuario.objects.filter(pk=user.pk)
+    if Rol.Nombre.RECEPCIONISTA in roles_efectivos_nombres(user):
+        visibles |= Usuario.objects.filter(
             rol__nombre__in=(
                 Rol.Nombre.CLIENTE,
                 Rol.Nombre.ENTRENADOR,
                 Rol.Nombre.RECEPCIONISTA,
             )
         )
-    return Usuario.objects.filter(pk=user.pk)
+    return visibles.distinct()
 
 
 def filtrar_clientes(queryset, campo, user, operativo=False):
@@ -81,12 +99,13 @@ def filtrar_asignaciones_entrenador(queryset, user):
         return queryset
     if not isinstance(user, Usuario):
         return queryset.none()
-    rol = rol_principal(user)
-    if rol == Rol.Nombre.ENTRENADOR:
-        return queryset.filter(entrenador_id=user.pk)
-    if rol == Rol.Nombre.CLIENTE:
-        return queryset.filter(cliente_id=user.pk)
-    return queryset.none()
+    roles = roles_efectivos_nombres(user)
+    visibles = queryset.none()
+    if Rol.Nombre.ENTRENADOR in roles:
+        visibles |= queryset.filter(entrenador_id=user.pk)
+    if Rol.Nombre.CLIENTE in roles:
+        visibles |= queryset.filter(cliente_id=user.pk)
+    return visibles.distinct()
 
 
 def filtrar_asignaciones_terapeuta(queryset, user):
@@ -94,12 +113,13 @@ def filtrar_asignaciones_terapeuta(queryset, user):
         return queryset
     if not isinstance(user, Usuario):
         return queryset.none()
-    rol = rol_principal(user)
-    if rol == Rol.Nombre.TERAPEUTA:
-        return queryset.filter(terapeuta_id=user.pk)
-    if rol == Rol.Nombre.CLIENTE:
-        return queryset.filter(cliente_id=user.pk)
-    return queryset.none()
+    roles = roles_efectivos_nombres(user)
+    visibles = queryset.none()
+    if Rol.Nombre.TERAPEUTA in roles:
+        visibles |= queryset.filter(terapeuta_id=user.pk)
+    if Rol.Nombre.CLIENTE in roles:
+        visibles |= queryset.filter(cliente_id=user.pk)
+    return visibles.distinct()
 
 
 def filtrar_perfil(queryset, user, nombre_perfil):
@@ -107,9 +127,13 @@ def filtrar_perfil(queryset, user, nombre_perfil):
         return queryset
     if not isinstance(user, Usuario):
         return queryset.none()
-    if rol_principal(user) == nombre_perfil:
+    roles = roles_efectivos_nombres(user)
+    if nombre_perfil in roles:
         return queryset.filter(pk=user.pk)
-    if nombre_perfil == Rol.Nombre.TERAPEUTA and rol_principal(user) == Rol.Nombre.CLIENTE:
+    if (
+        nombre_perfil == Rol.Nombre.TERAPEUTA
+        and Rol.Nombre.CLIENTE in roles
+    ):
         return queryset.filter(
             asignaciones_cliente__cliente_id=user.pk,
             asignaciones_cliente__activo=True,

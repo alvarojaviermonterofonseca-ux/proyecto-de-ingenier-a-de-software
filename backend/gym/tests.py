@@ -35,10 +35,12 @@ from .models import (
     PlanAlimentacion,
     PlanEntrenamiento,
     PlanEntrenamientoEjercicio,
+    Recurso,
     Recepcionista,
     RegistroComida,
     Rol,
     RolPermiso,
+    RolRecurso,
     Sesion,
     Terapeuta,
     Usuario,
@@ -682,6 +684,18 @@ class GymApiTests(APITestCase):
         self.assertEqual(Permiso.objects.count(), 95)
         admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
         self.assertEqual(RolPermiso.objects.filter(rol=admin).count(), 95)
+        self.assertEqual(
+            Recurso.objects.count(),
+            Permiso.objects.values("recurso").distinct().count(),
+        )
+        self.assertEqual(
+            RolRecurso.objects.filter(rol=admin).count(),
+            Recurso.objects.count(),
+        )
+        self.autenticar()
+        rol_api = self.client.get(f"/api/roles/{admin.pk}/")
+        self.assertEqual(rol_api.status_code, 200)
+        self.assertIn("usuarios", rol_api.data["recursos"])
         cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
         codigos = set(
             RolPermiso.objects.filter(rol=cliente).values_list("permiso__codigo", flat=True)
@@ -725,6 +739,18 @@ class GymApiTests(APITestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(set(respuesta.data["permisos"]), {"clientes:view", "clientes:export"})
         self.assertEqual(RolPermiso.objects.filter(rol=cliente).count(), 2)
+        self.assertTrue(
+            RolRecurso.objects.filter(rol=cliente, recurso__nombre="clientes").exists()
+        )
+
+    def test_permiso_exige_puente_rol_recurso_activo(self):
+        """No basta la concesión por acción: debe existir rol_has_recurso."""
+        admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+        puente = RolRecurso.objects.get(rol=admin, recurso__nombre="usuarios")
+
+        self.assertTrue(self.operador.tiene_permiso("usuarios:view"))
+        puente.delete()
+        self.assertFalse(self.operador.tiene_permiso("usuarios:view"))
 
     def test_guardar_permisos_conserva_sesiones_y_aplica_al_instante(self):
         """Cambiar permisos no debe expulsar a nadie: se leen en cada petición."""
@@ -738,7 +764,7 @@ class GymApiTests(APITestCase):
 
         respuesta = self.client.put(
             f"/api/v1/roles/{rol_cliente.pk}/permisos/",
-            {"permisos": ["clientes:view", "roles:view"]},
+            {"permisos": ["clientes:view", "clientes:export"]},
             format="json",
         )
         self.assertEqual(respuesta.status_code, 200, respuesta.data)
@@ -754,8 +780,9 @@ class GymApiTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_cliente}")
         perfil = self.client.get("/api/v1/me/")
         self.assertEqual(perfil.status_code, 200)
-        self.assertIn("roles:view", perfil.data["permisos_efectivos"])
-        self.assertEqual(self.client.get("/api/v1/roles/").status_code, 200)
+        self.assertIn("clientes:export", perfil.data["permisos_efectivos"])
+        # El catálogo de roles sigue reservado a administradores.
+        self.assertEqual(self.client.get("/api/v1/roles/").status_code, 403)
 
     def test_registrar_entrada_marca_la_llegada_del_cliente_autenticado(self):
         self.crear_cliente()
@@ -879,6 +906,289 @@ class GymApiTests(APITestCase):
 
         self.assertFalse(UsuarioRol.objects.get(usuario=usuario, rol=entrenador_role).activo)
         self.assertNotIn("entrenamientos:create", set(usuario.permisos_efectivos()))
+
+    def test_administrador_adicional_puede_gestionar_roles_y_permisos(self):
+        self.autenticar()
+        usuario = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "admin.adicional@example.com"
+        )
+        rol_admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+
+        asignacion = self.client.patch(
+            f"/api/usuarios/{usuario['id']}/roles/",
+            {"roles": [rol_admin.pk]},
+            format="json",
+        )
+        self.assertEqual(asignacion.status_code, 200, asignacion.data)
+
+        self.client.credentials()
+        self.autenticar_como(
+            "admin.adicional@example.com", "UnaClaveSegura123"
+        )
+        perfil = self.client.get("/api/me/")
+        self.assertEqual(perfil.status_code, 200)
+        self.assertTrue(perfil.data["es_administrador"])
+        self.assertIn(
+            rol_admin.pk, [rol["id"] for rol in perfil.data["roles_efectivos"]]
+        )
+
+        # El rol adicional le concede las mismas funciones administrativas.
+        self.assertEqual(self.client.get("/api/roles/").status_code, 200)
+        self.assertEqual(self.client.get("/api/permisos/").status_code, 200)
+
+        rol_cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+        permisos = self.client.put(
+            f"/api/roles/{rol_cliente.pk}/permisos/",
+            {"permisos": ["clientes:view", "clientes:export"]},
+            format="json",
+        )
+        self.assertEqual(permisos.status_code, 200, permisos.data)
+        self.assertEqual(
+            set(permisos.data["permisos"]), {"clientes:view", "clientes:export"}
+        )
+
+        nuevo = self.client.post(
+            "/api/usuarios/",
+            {
+                "rol": Rol.objects.get(nombre=Rol.Nombre.RECEPCIONISTA).pk,
+                "nombre": "Recepción adicional",
+                "correo": "recepcion.adicional@example.com",
+                "contrasena": "UnaClaveSegura123",
+                "perfil": {},
+            },
+            format="json",
+        )
+        self.assertEqual(nuevo.status_code, 201, nuevo.data)
+
+    def test_rol_administrador_y_ultimo_admin_no_pueden_eliminarse(self):
+        self.autenticar()
+        rol_admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+
+        borrado = self.client.delete(
+            f"/api/roles/{rol_admin.pk}/", HTTP_ACCEPT="application/json"
+        )
+        self.assertEqual(borrado.status_code, 400, borrado.data)
+        rol_admin.refresh_from_db()
+        self.assertTrue(rol_admin.is_active)
+
+        # El único administrador tampoco puede desactivarse ni cambiarse de rol.
+        desactivar = self.client.patch(
+            f"/api/usuarios/{self.operador.pk}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(desactivar.status_code, 400, desactivar.data)
+
+        cambiar_rol = self.client.patch(
+            f"/api/usuarios/{self.operador.pk}/",
+            {"rol": Rol.objects.get(nombre=Rol.Nombre.CLIENTE).pk},
+            format="json",
+        )
+        self.assertEqual(cambiar_rol.status_code, 400, cambiar_rol.data)
+
+        # Con un segundo administrador, las mismas operaciones sí son posibles.
+        segundo = self.crear_usuario_con_rol(
+            Rol.Nombre.ADMINISTRADOR, "segundo.admin@example.com"
+        )
+        self.assertTrue(segundo["is_active"])
+        self.assertEqual(
+            self.client.patch(
+                f"/api/usuarios/{self.operador.pk}/",
+                {"is_active": False},
+                format="json",
+            ).status_code,
+            200,
+        )
+
+    def test_alcance_de_datos_incluye_roles_adicionales(self):
+        mixto = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "mixto.alcance@example.com"
+        )
+        cliente_ajeno = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "ajeno.alcance@example.com"
+        )
+        entrenador = self.crear_usuario_con_rol(
+            Rol.Nombre.ENTRENADOR, "entrenador.alcance@example.com"
+        )
+        rol_recepcion = Rol.objects.get(nombre=Rol.Nombre.RECEPCIONISTA)
+
+        # El rol adicional de recepción amplía el alcance sin cambiar el rol
+        # principal del usuario (que sigue siendo cliente).
+        asignacion = self.client.patch(
+            f"/api/usuarios/{mixto['id']}/roles/",
+            {"roles": [rol_recepcion.pk]},
+            format="json",
+        )
+        self.assertEqual(asignacion.status_code, 200, asignacion.data)
+        usuario_mixto = Usuario.objects.get(pk=mixto["id"])
+        self.assertEqual(usuario_mixto.rol.nombre, Rol.Nombre.CLIENTE)
+        self.assertIn("usuarios:view", set(usuario_mixto.permisos_efectivos()))
+
+        self.client.credentials()
+        self.autenticar_como("mixto.alcance@example.com", "UnaClaveSegura123")
+
+        visibles = self.client.get("/api/usuarios/")
+        self.assertEqual(visibles.status_code, 200)
+        ids_visibles = {item["id"] for item in visibles.data["results"]}
+        self.assertIn(cliente_ajeno["id"], ids_visibles)
+        self.assertIn(entrenador["id"], ids_visibles)
+
+        clientes = self.client.get("/api/clientes/")
+        self.assertEqual(clientes.status_code, 200)
+        ids_clientes = {item["usuario"] for item in clientes.data["results"]}
+        self.assertIn(cliente_ajeno["id"], ids_clientes)
+
+    def test_cliente_puede_marcar_sus_notificaciones_como_leidas(self):
+        cliente = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "notificado@example.com"
+        )
+        creada = self.client.post(
+            "/api/notificaciones/",
+            {
+                "usuario": cliente["id"],
+                "tipo": "sistema",
+                "titulo": "Aviso",
+                "mensaje": "Contenido de prueba",
+            },
+            format="json",
+        )
+        self.assertEqual(creada.status_code, 201, creada.data)
+        notificacion_id = creada.data["id"]
+
+        self.client.credentials()
+        self.autenticar_como("notificado@example.com", "UnaClaveSegura123")
+        leida = self.client.post(
+            f"/api/notificaciones/{notificacion_id}/leer/", {}, format="json"
+        )
+        self.assertEqual(leida.status_code, 200, leida.data)
+        self.assertIsNotNone(
+            Notificacion.objects.get(pk=notificacion_id).leida_at
+        )
+        todas = self.client.post(
+            "/api/notificaciones/marcar-todas/", {}, format="json"
+        )
+        self.assertEqual(todas.status_code, 200, todas.data)
+
+    def test_exportar_csv_respeta_permiso_y_alcance(self):
+        self.crear_cliente()
+
+        self.autenticar()
+        exportacion = self.client.get("/api/clientes/exportar/")
+        self.assertEqual(exportacion.status_code, 200)
+        self.assertIn("text/csv", exportacion["Content-Type"])
+        self.assertIn("attachment;", exportacion["Content-Disposition"])
+        contenido = exportacion.content.decode("utf-8")
+        self.assertIn("ana@example.com", contenido)
+
+        rol_cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+        self.client.put(
+            f"/api/roles/{rol_cliente.pk}/permisos/",
+            {"permisos": ["clientes:view"]},
+            format="json",
+        )
+        self.client.credentials()
+        self.autenticar_como("ana@example.com", "UnaClaveSegura123")
+        self.assertEqual(self.client.get("/api/clientes/exportar/").status_code, 403)
+
+    def test_plan_de_entrenamiento_se_organiza_por_dias_y_lo_ve_el_cliente(self):
+        cliente = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "rutina@example.com"
+        )
+        entrenador = self.crear_usuario_con_rol(
+            Rol.Nombre.ENTRENADOR, "entrenador.rutina@example.com"
+        )
+        self.client.post(
+            "/api/asignaciones-cliente-entrenador/",
+            {
+                "cliente": cliente["id"],
+                "entrenador": entrenador["id"],
+                "fecha_inicio": "2026-01-01",
+                "fecha_fin": "2026-12-31",
+                "activo": True,
+            },
+            format="json",
+        )
+        plan = self.client.post(
+            "/api/planes-entrenamiento/",
+            {
+                "cliente": cliente["id"],
+                "entrenador": entrenador["id"],
+                "nombre": "Rutina semanal",
+                "objetivo": "Fuerza",
+                "fecha_inicio": "2026-01-01",
+                "fecha_fin": "2026-12-31",
+            },
+            format="json",
+        )
+        self.assertEqual(plan.status_code, 201, plan.data)
+        plan_id = plan.data["id"]
+
+        press = self.client.post(
+            "/api/ejercicios/",
+            {"nombre": "Press banca", "grupo_muscular": "Pecho"},
+            format="json",
+        )
+        self.assertEqual(press.status_code, 201, press.data)
+        sentadilla = self.client.post(
+            "/api/ejercicios/",
+            {"nombre": "Sentadilla", "grupo_muscular": "Piernas"},
+            format="json",
+        )
+        self.assertEqual(sentadilla.status_code, 201, sentadilla.data)
+
+        lunes = self.client.post(
+            "/api/planes-entrenamiento-ejercicios/",
+            {
+                "plan": plan_id,
+                "ejercicio": press.data["id"],
+                "dia_semana": "lunes",
+                "orden": 1,
+                "series": 4,
+                "repeticiones": 10,
+            },
+            format="json",
+        )
+        self.assertEqual(lunes.status_code, 201, lunes.data)
+        self.assertEqual(lunes.data["dia_semana"], "lunes")
+
+        martes = self.client.post(
+            "/api/planes-entrenamiento-ejercicios/",
+            {
+                "plan": plan_id,
+                "ejercicio": sentadilla.data["id"],
+                "dia_semana": "martes",
+                "orden": 1,
+                "series": 3,
+                "repeticiones": 12,
+            },
+            format="json",
+        )
+        self.assertEqual(martes.status_code, 201, martes.data)
+
+        duplicado = self.client.post(
+            "/api/planes-entrenamiento-ejercicios/",
+            {
+                "plan": plan_id,
+                "ejercicio": sentadilla.data["id"],
+                "dia_semana": "lunes",
+                "orden": 1,
+            },
+            format="json",
+        )
+        self.assertEqual(duplicado.status_code, 400, duplicado.data)
+
+        self.client.credentials()
+        self.autenticar_como("rutina@example.com", "UnaClaveSegura123")
+        rutina = self.client.get(
+            "/api/planes-entrenamiento-ejercicios/", {"plan": plan_id}
+        )
+        self.assertEqual(rutina.status_code, 200, rutina.data)
+        dias = [item["dia_semana"] for item in rutina.data["results"]]
+        self.assertEqual(dias, ["lunes", "martes"])
+        self.assertEqual(
+            rutina.data["results"][0]["ejercicio_detalle"]["grupo_muscular"],
+            "Pecho",
+        )
 
     def test_rbac_del_servidor_deniega_recursos_no_concedidos(self):
         respuesta = self.crear_cliente()

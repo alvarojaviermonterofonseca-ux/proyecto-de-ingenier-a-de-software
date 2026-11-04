@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal, OnDestroy } from '@angular/core';
 import { Observable, firstValueFrom, switchMap, tap } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
@@ -15,16 +15,26 @@ export class AuthService {
   private readonly _user = signal<CurrentUser | null>(null);
   private readonly _permissions = signal<ReadonlySet<string>>(new Set());
   private readonly _restoring = signal(false);
+  private readonly sessionExpiredHandler = () => this.clearSession();
 
   readonly user = this._user.asReadonly();
   readonly permissions = this._permissions.asReadonly();
   readonly restoring = this._restoring.asReadonly();
   readonly authenticated = computed(() => this._user() !== null);
   readonly roleName = computed(() => this._user()?.rol_detalle?.nombre ?? null);
-  readonly isAdmin = computed(() => this.roleName() === 'administrador');
+  readonly isAdmin = computed(
+    () =>
+      this._user()?.es_administrador === true ||
+      this.roleName() === 'administrador' ||
+      (this._user()?.roles_efectivos ?? []).some((rol) => rol.nombre === 'administrador'),
+  );
 
   constructor() {
-    window.addEventListener(SESSION_EXPIRED_EVENT, () => this.clearSession());
+    window.addEventListener(SESSION_EXPIRED_EVENT, this.sessionExpiredHandler);
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener(SESSION_EXPIRED_EVENT, this.sessionExpiredHandler);
   }
 
   login(correo: string, contrasena: string): Observable<CurrentUser> {
@@ -38,7 +48,13 @@ export class AuthService {
   }
 
   async restore(): Promise<boolean> {
+    // Si ya hay usuario, verificar que el token no haya expirado
     if (this._user()) {
+      const expiry = this.tokens.expiry;
+      if (expiry && new Date(expiry).getTime() <= Date.now()) {
+        this.clearSession();
+        return false;
+      }
       return true;
     }
     if (!this.tokens.token || this.tokens.isExpired()) {

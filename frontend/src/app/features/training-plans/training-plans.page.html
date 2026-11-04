@@ -76,7 +76,7 @@
               @if (auth.hasPermission('planes-entrenamiento-ejercicios:view')) {
                 <button class="button button--secondary button--sm" type="button" (click)="openExercises(plan)">
                   <app-icon name="dumbbell" [size]="15" />
-                  Ejercicios
+                  Ver rutina
                 </button>
               }
               <div class="row-actions">
@@ -172,7 +172,7 @@
 
 <app-modal
   [open]="exercisesModalOpen()"
-  [title]="'Ejercicios · ' + (exercisePlan()?.nombre ?? '')"
+  [title]="'Rutina semanal · ' + (exercisePlan()?.nombre ?? '')"
   [subtitle]="exercisePlan()?.cliente_detalle?.nombre ?? ''"
   size="wide"
   (closed)="closeExercises()"
@@ -185,50 +185,99 @@
   }
 
   @if (exerciseLoading()) {
-    <div class="loading-state"><span class="spinner"></span><span>Cargando ejercicios...</span></div>
+    <div class="loading-state"><span class="spinner"></span><span>Cargando rutina...</span></div>
   } @else if (planExercises().length === 0) {
     <app-empty-state
       icon="dumbbell"
-      title="Plan sin ejercicios"
-      message="Agrega el primer ejercicio para construir la sesión."
+      title="Rutina sin ejercicios"
+      message="Todavía no hay ejercicios asignados a este plan."
     />
   } @else {
-    <div class="exercise-plan-list">
-      @for (row of planExercises(); track row.id) {
-        <article>
-          <span class="exercise-plan-list__order">{{ row.orden }}</span>
-          <div>
-            <strong>{{ row.ejercicio_detalle.nombre }}</strong>
-            <p>{{ prescription(row) }}</p>
-            @if (row.observaciones) {
-              <small>{{ row.observaciones }}</small>
+    <div class="routine-week" aria-label="Resumen semanal">
+      @for (day of weeklyRoutine(); track day.value) {
+        <div class="routine-week__day" [class.routine-week__day--empty]="day.rows.length === 0">
+          <span>{{ day.label }}</span>
+          <strong>{{ day.rows.length }}</strong>
+          <small>ejercicio{{ day.rows.length === 1 ? '' : 's' }}</small>
+        </div>
+      }
+    </div>
+
+    @if (routineMuscles().length > 0) {
+      <div class="routine-muscles">
+        <span class="routine-muscles__label">Músculos de la semana</span>
+        @for (muscle of routineMuscles(); track muscle) {
+          <span class="muscle-chip">{{ muscle }}</span>
+        }
+      </div>
+    }
+
+    <div class="routine-days">
+      @for (day of routineDays(); track day.value) {
+        <section class="routine-day">
+          <header>
+            <div>
+              <h3>{{ day.label }}</h3>
+              <p>{{ day.rows.length }} ejercicio{{ day.rows.length === 1 ? '' : 's' }}</p>
+            </div>
+            <div class="routine-day__muscles">
+              @for (muscle of day.musculos; track muscle) {
+                <span class="muscle-chip muscle-chip--strong">{{ muscle }}</span>
+              }
+            </div>
+          </header>
+          <div class="exercise-plan-list">
+            @for (row of day.rows; track row.id) {
+              <article>
+                <span class="exercise-plan-list__order">{{ row.orden }}</span>
+                <div>
+                  <strong>{{ row.ejercicio_detalle.nombre }}</strong>
+                  @if (row.ejercicio_detalle.grupo_muscular) {
+                    <span class="exercise-plan-list__muscle">{{ row.ejercicio_detalle.grupo_muscular }}</span>
+                  }
+                  <p>{{ prescription(row) }}</p>
+                  @if (row.observaciones) {
+                    <small>{{ row.observaciones }}</small>
+                  }
+                </div>
+                @if (auth.hasPermission('planes-entrenamiento-ejercicios:delete')) {
+                  <button class="icon-button" type="button" (click)="removeExercise(row)" aria-label="Quitar ejercicio">
+                    <app-icon name="trash" [size]="15" />
+                  </button>
+                }
+              </article>
             }
           </div>
-          @if (auth.hasPermission('planes-entrenamiento-ejercicios:delete')) {
-            <button class="icon-button" type="button" (click)="removeExercise(row)" aria-label="Quitar ejercicio">
-              <app-icon name="trash" [size]="15" />
-            </button>
-          }
-        </article>
+        </section>
       }
     </div>
   }
 
   @if (canManageExercises()) {
     <form class="add-exercise" [formGroup]="exerciseForm" (ngSubmit)="addExercise()" novalidate>
-      <h3>Agregar ejercicio</h3>
+      <h3>Agregar ejercicio a un día</h3>
       <div class="form-grid form-grid--3">
         <div class="field field--full">
           <label for="plan-exercise">Ejercicio</label>
           <select id="plan-exercise" formControlName="ejercicio">
             <option [value]="0" disabled>Selecciona un ejercicio</option>
             @for (exercise of exercises(); track exercise.id) {
-              <option [value]="exercise.id">{{ exercise.nombre }}</option>
+              <option [value]="exercise.id">
+                {{ exercise.nombre }}{{ exercise.grupo_muscular ? ' · ' + exercise.grupo_muscular : '' }}
+              </option>
             }
           </select>
         </div>
         <div class="field">
-          <label for="plan-order">Orden</label>
+          <label for="plan-day">Día</label>
+          <select id="plan-day" formControlName="dia_semana" (change)="onDayChange()">
+            @for (day of weekDays; track day.value) {
+              <option [value]="day.value">{{ day.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="plan-order">Orden del día</label>
           <input id="plan-order" type="number" min="1" formControlName="orden" />
         </div>
         <div class="field">

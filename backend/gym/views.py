@@ -1,5 +1,8 @@
 """ViewSets CRUD para todos los recursos de Gym Control Pro."""
 
+import csv
+import io
+import json
 import mimetypes
 from datetime import timedelta
 from pathlib import Path
@@ -10,8 +13,9 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import renderers, status, viewsets
 from rest_framework.decorators import action
@@ -37,10 +41,12 @@ from .models import (
     PlanAlimentacion,
     PlanEntrenamiento,
     PlanEntrenamientoEjercicio,
+    Recurso,
     Recepcionista,
     RegistroComida,
     Rol,
     RolPermiso,
+    RolRecurso,
     Sesion,
     Terapeuta,
     Usuario,
@@ -49,7 +55,6 @@ from .models import (
 from .audit import registrar_evento
 from .permissions import (
     SoloAdministrador,
-    SoloAdministradorParaEscritura,
     TienePermisoRecurso,
     es_administrador,
 )
@@ -60,8 +65,10 @@ from .scoping import (
     filtrar_asignaciones_terapeuta,
     filtrar_clientes,
     filtrar_perfil,
+    roles_efectivos_nombres,
     usuarios_visibles,
 )
+from .resources import RECURSOS_API, RECURSOS_MENU
 from .serializers import (
     AdministradorSerializer,
     AsistenciaSerializer,
@@ -80,11 +87,13 @@ from .serializers import (
     PerfilActualUpdateSerializer,
     PERFIL_PROPIO_SERIALIZERS,
     PermisoSerializer,
+    PermisosRolPayloadSerializer,
     PlanAlimentacionSerializer,
     PlanEntrenamientoEjercicioSerializer,
     PlanEntrenamientoSerializer,
     RecepcionistaSerializer,
     RegistroComidaSerializer,
+    RolesUsuarioPayloadSerializer,
     RolPermisoSerializer,
     RolSerializer,
     SerializerVacio,
@@ -95,6 +104,7 @@ from .serializers import (
     UsuarioReadSerializer,
     UsuarioRolSerializer,
     UsuarioUpdateSerializer,
+    existe_otro_administrador_activo,
 )
 
 
@@ -106,6 +116,31 @@ def usuarios_con_rol(rol):
             asignaciones_usuarios__activo=True,
         )
     ).distinct()
+
+
+def _valor_csv(valor):
+    if valor is None:
+        return ""
+    if isinstance(valor, (dict, list)):
+        return json.dumps(valor, ensure_ascii=False)
+    return str(valor)
+
+
+def respuesta_csv(filas, nombre):
+    """Genera una descarga CSV a partir de una lista de diccionarios."""
+    buffer = io.StringIO()
+    if filas:
+        campos = list(filas[0].keys())
+        escritor = csv.DictWriter(buffer, fieldnames=campos)
+        escritor.writeheader()
+        for fila in filas:
+            escritor.writerow(
+                {campo: _valor_csv(fila.get(campo)) for campo in campos}
+            )
+    respuesta = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
+    respuesta["Content-Disposition"] = f'attachment; filename="{nombre}.csv"'
+    respuesta["Cache-Control"] = "private, no-store"
+    return respuesta
 
 
 class LoginView(APIView):
@@ -262,7 +297,7 @@ class PerfilActualDetalleView(APIView):
         )
 
     @extend_schema(
-        request=OpenApiResponse(description="Campos editables del perfil propio."),
+        request=OpenApiTypes.OBJECT,
         responses={200: OpenApiResponse(description="Perfil actualizado.")},
     )
     def patch(self, request):
@@ -293,9 +328,10 @@ class ResumenView(APIView):
     @extend_schema(responses={200: OpenApiResponse(description="Resumen del panel.")})
     def get(self, request):
         usuario = request.user
+        roles = roles_efectivos_nombres(usuario)
         rol = getattr(getattr(usuario, "rol", None), "nombre", None)
-        es_cliente = rol == Rol.Nombre.CLIENTE
-        es_recepcionista = rol == Rol.Nombre.RECEPCIONISTA
+        es_cliente = Rol.Nombre.CLIENTE in roles
+        es_recepcionista = Rol.Nombre.RECEPCIONISTA in roles
 
         clientes = (
             clientes_operativos(usuario)
@@ -514,6 +550,8 @@ class ViewSetBase(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticated, TienePermisoRecurso]
     recurso_permiso = None
+    accion_permiso = None
+    accion_permiso_por_accion = {"exportar": "export"}
     politica_borrado = "logico"
 
     def queryset_base(self):
@@ -689,14 +727,33 @@ class ViewSetBase(viewsets.ModelViewSet):
             }
         )
 
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Descarga CSV del listado.")},
+        description=(
+            "Exporta el listado visible para el usuario en CSV. Requiere el "
+            "permiso export del recurso y respeta el mismo alcance que el listado."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="exportar")
+    def exportar(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        filas = self.get_serializer(queryset, many=True).data
+        return respuesta_csv(filas, self.recurso_permiso or "exportacion")
+
 
 class RolViewSet(ViewSetBase):
-    queryset = Rol.objects.prefetch_related("permisos_asignados__permiso", "asignaciones_usuarios")
+    queryset = Rol.objects.prefetch_related(
+        "permisos_asignados__permiso",
+        "recursos_asignados__recurso",
+        "asignaciones_usuarios",
+    )
     serializer_class = RolSerializer
     recurso_permiso = "roles"
     filterset_fields = ("is_active",)
     search_fields = ("nombre", "descripcion")
     ordering_fields = ("nombre", "created_at")
+    # El catálogo de roles y su matriz se gestionan con permisos RBAC.
+    permission_classes = [IsAuthenticated, TienePermisoRecurso]
     # Catálogo sin deleted_at: el DELETE desactiva el rol y lo oculta.
     politica_borrado = "logico"
 
@@ -725,17 +782,43 @@ class RolViewSet(ViewSetBase):
             raise ValidationError(
                 {"detalle": "El rol administrador base no puede eliminarse."}
             )
-        super().perform_destroy(instance)
+        usuarios_principales = instance.usuarios.filter(
+            is_active=True, deleted_at__isnull=True
+        )
+        if usuarios_principales.exists():
+            raise ValidationError(
+                {
+                    "detalle": (
+                        "No puede eliminar un rol que es el rol principal de "
+                        "usuarios activos. Reasigne primero esos usuarios."
+                    )
+                }
+            )
+        usuarios = list(usuarios_con_rol(instance).values_list("pk", flat=True))
+        with transaction.atomic():
+            super().perform_destroy(instance)
+            Sesion.objects.filter(usuario_id__in=usuarios).delete()
 
+    @extend_schema(
+        methods=["GET"],
+        operation_id="rol_permisos_consultar",
+        responses={200: OpenApiResponse(description="Permisos asignados al rol.")},
+    )
+    @extend_schema(
+        methods=["PUT"],
+        operation_id="rol_permisos_reemplazar",
+        request=PermisosRolPayloadSerializer,
+        responses={200: OpenApiResponse(description="Permisos del rol actualizados.")},
+    )
     @action(detail=True, methods=["get", "put"], url_path="permisos")
     def permisos(self, request, pk=None):
         """Consulta o reemplaza atómicamente los permisos de un rol."""
         rol = self.get_object()
 
         if request.method == "PUT":
-            if not es_administrador(request.user):
+            if not (es_administrador(request.user) or request.user.tiene_permiso("roles:edit")):
                 raise PermissionDenied(
-                    "Solo un administrador puede modificar los permisos de un rol."
+                    "Solo un usuario con permiso para modificar roles puede actualizar sus permisos."
                 )
             codigos = request.data.get("permisos")
             if not isinstance(codigos, list) or not all(isinstance(codigo, str) for codigo in codigos):
@@ -751,6 +834,12 @@ class RolViewSet(ViewSetBase):
                 )
 
             with transaction.atomic():
+                # Recursos que tenía el rol antes del cambio
+                recursos_antes = set(
+                    rol.recursos_asignados.filter(recurso__is_active=True).values_list(
+                        "recurso__nombre", flat=True
+                    )
+                )
                 RolPermiso.objects.filter(rol=rol).exclude(permiso__in=permisos).delete()
                 existentes = set(
                     RolPermiso.objects.filter(rol=rol).values_list("permiso_id", flat=True)
@@ -762,6 +851,21 @@ class RolViewSet(ViewSetBase):
                         if permiso.pk not in existentes
                     ]
                 )
+                # ``bulk_create`` no ejecuta ``RolPermiso.save()``, así que
+                # sincronizamos explícitamente el puente rol↔recurso.
+                recursos = {
+                    permiso.recurso: permiso for permiso in permisos
+                }
+                for nombre_recurso in recursos:
+                    recurso, _ = Recurso.objects.get_or_create(nombre=nombre_recurso)
+                    RolRecurso.objects.get_or_create(rol=rol, recurso=recurso)
+                # Eliminar RolRecurso de recursos que ya no tienen permisos en este rol
+                recursos_despues = set(recursos.keys())
+                recursos_a_eliminar = recursos_antes - recursos_despues
+                if recursos_a_eliminar:
+                    RolRecurso.objects.filter(
+                        rol=rol, recurso__nombre__in=recursos_a_eliminar
+                    ).delete()
                 registrar_evento(
                     request,
                     "actualizar-permisos",
@@ -782,17 +886,12 @@ class RolViewSet(ViewSetBase):
             }
         )
 
-    def perform_destroy(self, instance):
-        usuarios = list(usuarios_con_rol(instance).values_list("pk", flat=True))
-        with transaction.atomic():
-            super().perform_destroy(instance)
-            Sesion.objects.filter(usuario_id__in=usuarios).delete()
-
 
 class PermisoViewSet(ViewSetBase):
     queryset = Permiso.objects.all()
     serializer_class = PermisoSerializer
     recurso_permiso = "permisos"
+    permission_classes = [IsAuthenticated, TienePermisoRecurso]
     filterset_fields = ("recurso", "accion", "is_active")
     search_fields = ("codigo", "descripcion")
     ordering_fields = ("codigo", "recurso", "accion")
@@ -805,7 +904,7 @@ class RolPermisoViewSet(ViewSetBase):
     serializer_class = RolPermisoSerializer
     recurso_permiso = "roles"
     filterset_fields = ("rol", "permiso")
-    permission_classes = [IsAuthenticated, TienePermisoRecurso, SoloAdministradorParaEscritura]
+    permission_classes = [IsAuthenticated, TienePermisoRecurso]
     # Tabla puente sin historial propio: se elimina físicamente.
     politica_borrado = "fisico"
 
@@ -863,11 +962,21 @@ class UsuarioViewSet(ViewSetBase):
             raise ValidationError(
                 {"detalle": "No puede eliminar su propia cuenta."}
             )
-        if instance.rol.nombre == Rol.Nombre.ADMINISTRADOR:
-            administradores = Usuario.objects.filter(
-                rol__nombre=Rol.Nombre.ADMINISTRADOR,
-                is_active=True,
-                deleted_at__isnull=True,
+        if es_administrador(instance):
+            administradores = (
+                Usuario.objects.filter(
+                    is_active=True,
+                    deleted_at__isnull=True,
+                )
+                .filter(
+                    Q(rol__nombre=Rol.Nombre.ADMINISTRADOR)
+                    | Q(
+                        asignaciones_usuarios__rol__nombre=Rol.Nombre.ADMINISTRADOR,
+                        asignaciones_usuarios__activo=True,
+                        asignaciones_usuarios__rol__is_active=True,
+                    )
+                )
+                .distinct()
             )
             if administradores.count() <= 1:
                 raise ValidationError(
@@ -916,6 +1025,23 @@ class UsuarioViewSet(ViewSetBase):
             ).data
         )
 
+    @extend_schema(
+        methods=["GET"],
+        operation_id="usuario_roles_consultar",
+        responses={200: OpenApiResponse(description="Roles del usuario.")},
+    )
+    @extend_schema(
+        methods=["PATCH"],
+        operation_id="usuario_roles_actualizar",
+        request=RolesUsuarioPayloadSerializer,
+        responses={200: OpenApiResponse(description="Roles del usuario actualizados.")},
+    )
+    @extend_schema(
+        methods=["PUT"],
+        operation_id="usuario_roles_reemplazar",
+        request=RolesUsuarioPayloadSerializer,
+        responses={200: OpenApiResponse(description="Roles del usuario reemplazados.")},
+    )
     @action(detail=True, methods=["get", "patch", "put"], url_path="roles")
     def roles(self, request, pk=None):
         """Consulta o reemplaza los roles adicionales activos de un usuario."""
@@ -923,9 +1049,13 @@ class UsuarioViewSet(ViewSetBase):
         mutando = request.method in {"PATCH", "PUT"}
 
         if mutando:
-            if not es_administrador(request.user):
+            if not (
+                es_administrador(request.user)
+                or request.user.tiene_permiso("usuarios:edit")
+                or request.user.tiene_permiso("roles:edit")
+            ):
                 raise PermissionDenied(
-                    "Solo un administrador puede modificar los roles de un usuario."
+                    "Solo un usuario con permiso puede modificar los roles de un usuario."
                 )
             roles_ids = request.data.get("roles")
             if not isinstance(roles_ids, list) or not all(isinstance(valor, int) for valor in roles_ids):
@@ -940,6 +1070,28 @@ class UsuarioViewSet(ViewSetBase):
 
             deseados = set(roles_ids)
             deseados.add(usuario.rol_id)
+            era_admin = es_administrador(usuario)
+            seguira_admin = (
+                usuario.is_active
+                and Rol.Nombre.ADMINISTRADOR
+                in set(
+                    Rol.objects.filter(pk__in=deseados, is_active=True)
+                    .values_list("nombre", flat=True)
+                )
+            )
+            if (
+                era_admin
+                and not seguira_admin
+                and not existe_otro_administrador_activo(usuario)
+            ):
+                raise ValidationError(
+                    {
+                        "roles": (
+                            "No puede quitar el rol administrador al último "
+                            "administrador activo."
+                        )
+                    }
+                )
             asignado_por = request.user if isinstance(request.user, Usuario) else None
             with transaction.atomic():
                 existentes = {
@@ -1002,7 +1154,7 @@ class UsuarioRolViewSet(ViewSetBase):
     serializer_class = UsuarioRolSerializer
     recurso_permiso = "usuarios"
     filterset_fields = ("usuario", "rol", "activo")
-    permission_classes = [IsAuthenticated, TienePermisoRecurso, SoloAdministrador]
+    permission_classes = [IsAuthenticated, TienePermisoRecurso]
     # Tabla puente sin historial propio: se elimina físicamente.
     politica_borrado = "fisico"
 
@@ -1018,8 +1170,33 @@ class UsuarioRolViewSet(ViewSetBase):
             )
 
     def perform_destroy(self, instance):
+        usuario = instance.usuario
+        if (
+            instance.rol.nombre == Rol.Nombre.ADMINISTRADOR
+            and instance.activo
+            and usuario.is_active
+            and not (
+                usuario.rol.is_active
+                and usuario.rol.nombre == Rol.Nombre.ADMINISTRADOR
+            )
+            and not usuario.asignaciones_usuarios.filter(
+                rol__nombre=Rol.Nombre.ADMINISTRADOR,
+                activo=True,
+                rol__is_active=True,
+            )
+            .exclude(pk=instance.pk)
+            .exists()
+            and not existe_otro_administrador_activo(usuario)
+        ):
+            raise ValidationError(
+                {
+                    "detalle": (
+                        "No puede quitar el rol administrador al último "
+                        "administrador activo."
+                    )
+                }
+            )
         with transaction.atomic():
-            usuario = instance.usuario
             rol = instance.rol.nombre
             super().perform_destroy(instance)
             usuario.sesiones.all().delete()
@@ -1035,7 +1212,17 @@ class ClienteViewSet(ViewSetBase):
     ordering_fields = ("usuario__nombre", "created_at", "is_active")
 
     def get_serializer_class(self):
-        if getattr(getattr(self.request.user, "rol", None), "nombre", None) == Rol.Nombre.RECEPCIONISTA:
+        roles = roles_efectivos_nombres(self.request.user)
+        solo_recepcion = (
+            Rol.Nombre.RECEPCIONISTA in roles
+            and not roles
+            & {
+                Rol.Nombre.ADMINISTRADOR,
+                Rol.Nombre.ENTRENADOR,
+                Rol.Nombre.TERAPEUTA,
+            }
+        )
+        if solo_recepcion:
             return ClienteOperativoSerializer
         return ClienteSerializer
 
@@ -1547,6 +1734,7 @@ class NotificacionViewSet(ViewSetBase):
     queryset = Notificacion.objects.select_related("usuario__rol")
     serializer_class = NotificacionSerializer
     recurso_permiso = "notificaciones"
+    accion_permiso_por_accion = {"leer": "view", "marcar_todas": "view"}
     filterset_fields = ("usuario", "estado", "tipo")
     ordering_fields = ("created_at", "programada_at", "enviada_at")
 
@@ -1601,7 +1789,7 @@ class EventoAuditoriaViewSet(viewsets.ReadOnlyModelViewSet):
 # Recursos con conteo en el menú de la SPA. La clave es la que consume el
 # frontend y el valor es el ViewSet que define el alcance de cada listado, de
 # modo que el número del menú coincide siempre con el total del recurso.
-RECURSOS_MENU = {
+_RECURSOS_MENU_VIEWSETS = {
     "usuarios": UsuarioViewSet,
     "usuarios-roles": UsuarioRolViewSet,
     "roles": RolViewSet,
@@ -1639,7 +1827,7 @@ class ConteoRecursosView(APIView):
     @extend_schema(responses={200: OpenApiResponse(description="Conteo por recurso.")})
     def get(self, request):
         conteos = {}
-        for recurso, viewset_clase in RECURSOS_MENU.items():
+        for recurso, viewset_clase in _RECURSOS_MENU_VIEWSETS.items():
             if not self._puede_ver(recurso, viewset_clase):
                 continue
             conteos[recurso] = self._contar(viewset_clase)
@@ -1647,10 +1835,12 @@ class ConteoRecursosView(APIView):
 
     def _puede_ver(self, recurso, viewset_clase):
         usuario = self.request.user
-        if recurso == "auditoria" and not es_administrador(usuario):
-            return False
         if not isinstance(usuario, Usuario):
             return bool(getattr(usuario, "is_staff", False))
+        if es_administrador(usuario):
+            return True
+        if recurso in {"auditoria"} and not es_administrador(usuario):
+            return False
         return usuario.tiene_permiso(f"{viewset_clase.recurso_permiso}:view")
 
     def _contar(self, viewset_clase):

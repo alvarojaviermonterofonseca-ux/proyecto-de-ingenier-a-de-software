@@ -99,6 +99,10 @@
               <app-icon name="user" [size]="16" />
               Mi perfil
             </a>
+            <button type="button" (click)="refreshPermissions()">
+              <app-icon name="refresh" [size]="16" />
+              Actualizar permisos
+            </button>
             <button type="button" (click)="logout()">
               <app-icon name="logout" [size]="16" />
               Cerrar sesión

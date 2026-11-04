@@ -189,6 +189,39 @@ class BorradoLogicoSimple:
         return None
 
 
+class Recurso(BorradoLogicoSimple, models.Model):
+    """Recurso protegible del sistema.
+
+    Un recurso es la unidad que aparece en la matriz RBAC (por ejemplo,
+    ``clientes`` o ``planes-entrenamiento``).  Las acciones concretas se
+    mantienen en :class:`Permiso`; separar ambas entidades evita que el
+    nombre del recurso sea una cadena sin integridad referencial.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    nombre = models.CharField(max_length=50, unique=True)
+    descripcion = models.CharField(max_length=255, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "recursos"
+        indexes = [models.Index(fields=["is_active"], name="idx_recursos_active")]
+        ordering = ["nombre"]
+
+    def clean(self):
+        super().clean()
+        self.nombre = (self.nombre or "").strip().lower()
+
+    def save(self, *args, **kwargs):
+        self.nombre = (self.nombre or "").strip().lower()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.nombre
+
+
 class Rol(BorradoLogicoSimple, models.Model):
     class Nombre(models.TextChoices):
         CLIENTE = "cliente", "Cliente"
@@ -207,6 +240,9 @@ class Rol(BorradoLogicoSimple, models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     permisos = models.ManyToManyField(
         "Permiso", through="RolPermiso", related_name="roles", blank=True
+    )
+    recursos = models.ManyToManyField(
+        "Recurso", through="RolRecurso", related_name="roles", blank=True
     )
 
     class Meta:
@@ -235,6 +271,15 @@ class Permiso(BorradoLogicoSimple, models.Model):
 
     id = models.BigAutoField(primary_key=True)
     codigo = models.CharField(max_length=100, unique=True)
+    # Se conserva ``recurso`` como código estable para la API y los permisos
+    # legibles, pero la FK es la fuente de integridad referencial.
+    recurso_catalogo = models.ForeignKey(
+        Recurso,
+        on_delete=models.PROTECT,
+        related_name="permisos",
+        db_column="recurso_id",
+        blank=True,
+    )
     recurso = models.CharField(max_length=50)
     accion = models.CharField(max_length=20, choices=Accion.choices)
     descripcion = models.CharField(max_length=255, null=True, blank=True)
@@ -263,7 +308,16 @@ class Permiso(BorradoLogicoSimple, models.Model):
         self.recurso = (self.recurso or "").strip().lower()
         self.accion = (self.accion or "").strip().lower()
         self.codigo = f"{self.recurso}:{self.accion}"
-        return super().save(*args, **kwargs)
+        # Mantiene el catálogo de recursos normalizado incluso para escrituras
+        # directas desde comandos de gestión o la consola de Django.
+        recurso, _ = Recurso.objects.get_or_create(nombre=self.recurso)
+        self.recurso_catalogo = recurso
+        resultado = super().save(*args, **kwargs)
+        # Si se reclasifica un permiso ya concedido, sus roles también deben
+        # quedar vinculados al nuevo recurso antes de poder usarlo.
+        for rol_id in self.roles_asignados.values_list("rol_id", flat=True):
+            RolRecurso.objects.get_or_create(rol_id=rol_id, recurso=recurso)
+        return resultado
 
     def __str__(self):
         return self.codigo
@@ -292,6 +346,47 @@ class RolPermiso(models.Model):
 
     def __str__(self):
         return f"{self.rol.nombre} -> {self.permiso.codigo}"
+
+    def save(self, *args, **kwargs):
+        resultado = super().save(*args, **kwargs)
+        recurso, _ = Recurso.objects.get_or_create(nombre=self.permiso.recurso)
+        RolRecurso.objects.get_or_create(rol=self.rol, recurso=recurso)
+        return resultado
+
+
+class RolRecurso(models.Model):
+    """Puente N:M entre roles y recursos, equivalente a ``rol_has_recurso``.
+
+    Se conserva separado de ``RolPermiso``: el puente expresa *a qué módulo*
+    puede entrar un rol, mientras que los permisos expresan *qué operación*
+    puede ejecutar dentro de ese módulo.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    rol = models.ForeignKey(
+        Rol, on_delete=models.CASCADE, related_name="recursos_asignados", db_column="rol_id"
+    )
+    recurso = models.ForeignKey(
+        Recurso,
+        on_delete=models.CASCADE,
+        related_name="roles_asignados",
+        db_column="recurso_id",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "rol_has_recurso"
+        constraints = [
+            models.UniqueConstraint(fields=["rol", "recurso"], name="uq_rol_recurso")
+        ]
+        indexes = [
+            models.Index(fields=["rol"], name="idx_rolrecurso_rol"),
+            models.Index(fields=["recurso"], name="idx_rolrecurso_recurso"),
+        ]
+        ordering = ["rol", "recurso"]
+
+    def __str__(self):
+        return f"{self.rol.nombre} -> {self.recurso.nombre}"
 
 
 class Usuario(ModeloAuditable):
@@ -391,6 +486,8 @@ class Usuario(ModeloAuditable):
             Permiso.objects.filter(
                 is_active=True,
                 roles_asignados__rol__in=self.roles_efectivos(),
+                roles_asignados__rol__recursos_asignados__recurso_id=F("recurso_catalogo_id"),
+                roles_asignados__rol__recursos_asignados__recurso__is_active=True,
             )
             .values_list("codigo", flat=True)
             .distinct()
@@ -404,9 +501,20 @@ class Usuario(ModeloAuditable):
                 codigo=codigo,
                 is_active=True,
                 roles_asignados__rol__in=self.roles_efectivos(),
+                roles_asignados__rol__recursos_asignados__recurso_id=F("recurso_catalogo_id"),
+                roles_asignados__rol__recursos_asignados__recurso__is_active=True,
             )
             .exists()
         )
+
+    def recursos_efectivos(self):
+        """Recursos activos concedidos por cualquiera de sus roles activos."""
+        if not self.pk:
+            return Recurso.objects.none()
+        return Recurso.objects.filter(
+            is_active=True,
+            roles_asignados__rol__in=self.roles_efectivos(),
+        ).distinct()
 
     def asignar_rol(self, rol, asignado_por=None, activo=True):
         """Crea o reactiva una asignación sin duplicarla (unique usuario+rol)."""
@@ -1034,11 +1142,23 @@ class PlanEntrenamiento(ModeloAuditable):
 
 
 class PlanEntrenamientoEjercicio(models.Model):
+    class DiaSemana(models.TextChoices):
+        LUNES = "lunes", "Lunes"
+        MARTES = "martes", "Martes"
+        MIERCOLES = "miercoles", "Miércoles"
+        JUEVES = "jueves", "Jueves"
+        VIERNES = "viernes", "Viernes"
+        SABADO = "sabado", "Sábado"
+        DOMINGO = "domingo", "Domingo"
+
     id = models.BigAutoField(primary_key=True)
     plan = models.ForeignKey(
         PlanEntrenamiento, on_delete=models.CASCADE, related_name="ejercicios_planificados", db_column="plan_id"
     )
     ejercicio = models.ForeignKey(Ejercicio, on_delete=models.PROTECT, related_name="en_planes", db_column="ejercicio_id")
+    dia_semana = models.CharField(
+        max_length=10, choices=DiaSemana.choices, default=DiaSemana.LUNES
+    )
     orden = models.PositiveSmallIntegerField()
     series = models.PositiveSmallIntegerField(null=True, blank=True)
     repeticiones = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -1051,15 +1171,20 @@ class PlanEntrenamientoEjercicio(models.Model):
     class Meta:
         db_table = "plan_entrenamiento_ejercicio"
         constraints = [
-            models.UniqueConstraint(fields=["plan", "orden"], name="uq_pte_orden"),
+            models.UniqueConstraint(
+                fields=["plan", "dia_semana", "orden"], name="uq_pte_dia_orden"
+            ),
             models.CheckConstraint(condition=Q(series__isnull=True) | Q(series__gt=0), name="chk_pte_series"),
             models.CheckConstraint(
                 condition=Q(repeticiones__isnull=True) | Q(repeticiones__gt=0), name="chk_pte_repeticiones"
             ),
             models.CheckConstraint(condition=Q(peso_kg__isnull=True) | Q(peso_kg__gte=0), name="chk_pte_peso"),
         ]
-        indexes = [models.Index(fields=["ejercicio"], name="idx_pte_ejercicio")]
-        ordering = ["plan", "orden"]
+        indexes = [
+            models.Index(fields=["ejercicio"], name="idx_pte_ejercicio"),
+            models.Index(fields=["plan", "dia_semana"], name="idx_pte_plan_dia"),
+        ]
+        ordering = ["plan", "dia_semana", "orden", "pk"]
 
 
 class PlanAlimentacion(ModeloAuditable):

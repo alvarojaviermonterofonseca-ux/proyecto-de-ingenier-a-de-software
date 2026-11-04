@@ -26,6 +26,10 @@ import { IconComponent } from '../../shared/icon.component';
         <button class="button button--secondary" type="button" (click)="back()">
           Volver
         </button>
+        <a class="button button--outline" routerLink="/login">
+          <app-icon name="log-in" [size]="17" />
+          Iniciar sesión
+        </a>
       </div>
       <p class="state-page__meta">
         Sesión: {{ auth.user()?.correo }} · {{ auth.roleName() ?? 'Sin rol' }}
