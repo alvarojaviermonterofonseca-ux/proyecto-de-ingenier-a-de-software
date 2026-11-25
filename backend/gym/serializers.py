@@ -7,6 +7,7 @@ en un hash; ``contrasena_hash`` nunca forma parte de una respuesta JSON.
 import json
 import logging
 from copy import copy
+from decimal import Decimal
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
@@ -1659,6 +1660,58 @@ class PlanEntrenamientoEjercicioSerializer(ModeloValidadoSerializer):
             request = self.context.get("request")
             datos["imagen_url"] = request.build_absolute_uri(ruta) if request else ruta
         return datos
+
+
+class EjercicioDelGimnasioField(serializers.PrimaryKeyRelatedField):
+    """Ejercicio activo del catálogo del gimnasio de quien hace la petición."""
+
+    def get_queryset(self):
+        request = self.context.get("request")
+        return filtrar_por_gimnasio(
+            Ejercicio.objects.filter(deleted_at__isnull=True, is_active=True),
+            getattr(request, "user", None),
+        )
+
+
+class FilaDiaPlanSerializer(serializers.Serializer):
+    """Un ejercicio del día, tal como lo arma el entrenador en el editor."""
+
+    ejercicio = EjercicioDelGimnasioField()
+    series = serializers.IntegerField(min_value=1, max_value=20, required=False, allow_null=True)
+    repeticiones = serializers.IntegerField(min_value=1, max_value=200, required=False, allow_null=True)
+    peso_kg = serializers.DecimalField(
+        max_digits=6, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True
+    )
+    descanso_segundos = serializers.IntegerField(min_value=0, max_value=900, required=False, allow_null=True)
+    observaciones = serializers.CharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
+
+    def validate_observaciones(self, valor):
+        return (valor or "").strip() or None
+
+
+class DiaPlanEntrenamientoSerializer(serializers.Serializer):
+    """Día completo de un plan: título, músculos y la lista ordenada de ejercicios.
+
+    ``ejercicios`` reemplaza todas las filas del día en el orden recibido; una
+    lista vacía deja el día sin ejercicios. ``titulo`` y ``musculos`` son
+    opcionales: si no se envían, se conservan los que tenía el día.
+    """
+
+    MAX_EJERCICIOS = 30
+
+    titulo = serializers.CharField(max_length=60, required=False, allow_blank=True)
+    musculos = serializers.ListField(child=serializers.CharField(), required=False)
+    ejercicios = FilaDiaPlanSerializer(many=True, max_length=MAX_EJERCICIOS)
+
+    def validate_titulo(self, valor):
+        return valor.strip()
+
+    def validate_musculos(self, valor):
+        try:
+            validar_musculos(valor)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
+        return valor
 
 
 class PlanAlimentacionSerializer(ModeloValidadoSerializer):

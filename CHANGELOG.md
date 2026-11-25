@@ -6,6 +6,23 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Sin publicar]
 
+### Agregado
+
+- Planes de entrenamiento: el entrenador y el administrador arman cada día agregando **varios
+  ejercicios a la vez** desde un selector múltiple. Cada ejercicio tiene sus series y repeticiones
+  editables (más peso, descanso e indicaciones opcionales), se puede reordenar o quitar, y el día
+  completo (nombre, músculos y ejercicios) se guarda con un solo botón «Guardar plan».
+- `PUT /api/v1/planes-entrenamiento/{id}/dias/{dia}/`: guarda el día completo en una transacción,
+  reemplazando sus ejercicios en el orden recibido.
+
+### Corregido
+
+- Agregar ejercicios desde dos pestañas a la vez ya no choca con el orden duplicado (409): ahora el
+  servidor asigna el orden.
+- El entrenador ya puede quitar ejercicios de un día: antes el botón usaba `DELETE`, que su rol no
+  tiene permitido.
+- En pantallas medianas, el cuerpo 3D ya no tapa los botones del día.
+
 ## [1.1.0] - 2026-11-25
 
 ### Agregado

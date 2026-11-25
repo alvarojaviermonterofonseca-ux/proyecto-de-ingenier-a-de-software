@@ -55,7 +55,7 @@
                   type="button"
                   class="plan-item"
                   [class.is-selected]="plan.id === selectedId()"
-                  (click)="selectPlan(plan)"
+                  (click)="choosePlan(plan)"
                 >
                   <app-avatar [name]="plan.cliente_detalle.nombre" [size]="36" />
                   <span class="plan-item__text">
@@ -131,182 +131,299 @@
           @if (currentDay(); as day) {
             <div class="workout__body">
               <div class="workout__main">
-                <div class="day-head">
-                  <div>
-                    <h3>{{ day.title }}</h3>
-                    <p>
-                      {{ day.label }} · Día {{ day.index + 1 }} · {{ day.rows.length }}
-                      {{ day.rows.length === 1 ? 'ejercicio' : 'ejercicios' }} · {{ day.sets }} series
-                    </p>
-                  </div>
-                  @if (canEditPlan() && !isClient() && !dayEditorOpen()) {
-                    <button class="lime-button" type="button" (click)="openDayEditor()">
-                      <app-icon name="edit" [size]="15" /> Armar {{ day.label.toLowerCase() }}
-                    </button>
-                  }
-                </div>
-
-                @if (day.muscles.length) {
-                  <div class="muscle-tags" aria-label="Músculos del día">
-                    @for (code of day.muscles; track code) {
-                      <span class="muscle-tag">{{ muscleLabel(code) }}</span>
-                    }
-                  </div>
-                }
-
-                @if (exerciseLoading()) {
-                  <div class="loading-state"><span class="spinner"></span><span>Cargando ejercicios...</span></div>
-                } @else if (day.rows.length === 0) {
-                  <div class="rest-day">
-                    <strong>{{ day.muscles.length ? 'Aún sin ejercicios' : 'Día de descanso' }}</strong>
-                    <span>
-                      @if (isClient()) {
-                        {{ day.muscles.length ? 'Tu entrenador agregará los ejercicios.' : 'Recupera, hidrátate y duerme bien.' }}
-                      } @else {
-                        Abre «Armar {{ day.label.toLowerCase() }}» para marcar músculos y agregar ejercicios.
-                      }
-                    </span>
-                  </div>
-                } @else {
-                  <ol class="exercise-list">
-                    @for (row of day.rows; track row.id) {
-                      <li class="exercise-row">
-                        <app-exercise-thumb
-                          [path]="apiPath(row.ejercicio_detalle.imagen_url)"
-                          [version]="row.ejercicio_detalle.updated_at"
-                          [name]="row.ejercicio_detalle.nombre"
-                          [size]="76"
-                        />
-                        <div class="exercise-row__info">
-                          <strong>{{ row.ejercicio_detalle.nombre }}</strong>
-                          <span class="exercise-row__muscles">
-                            {{ row.ejercicio_detalle.musculos.length
-                              ? row.ejercicio_detalle.musculos.map(muscleLabel).join(' · ')
-                              : (row.ejercicio_detalle.grupo_muscular || 'Sin músculos marcados') }}
-                          </span>
-                          <div class="pills">
-                            @if (row.series) { <span class="pill">{{ row.series }} series</span> }
-                            @if (row.repeticiones) { <span class="pill">{{ row.repeticiones }} reps</span> }
-                            @if (row.peso_kg) { <span class="pill">{{ kg(row.peso_kg) }} kg</span> }
-                            @if (row.descanso_segundos) { <span class="pill pill--soft">{{ row.descanso_segundos }} s descanso</span> }
-                          </div>
-                          @if (row.observaciones) {
-                            <p class="exercise-row__note">{{ row.observaciones }}</p>
-                          }
-                        </div>
-                        @if (dayEditorOpen() && canManageRows()) {
-                          <button
-                            class="icon-ghost"
-                            type="button"
-                            (click)="removeExercise(row)"
-                            [attr.aria-label]="'Quitar ' + row.ejercicio_detalle.nombre"
-                          >
-                            <app-icon name="trash" [size]="16" />
-                          </button>
-                        }
-                      </li>
-                    }
-                  </ol>
-                }
-
-                <!-- Editor del día (entrenador / administrador) -->
                 @if (dayEditorOpen()) {
-                  <section class="day-editor" aria-label="Armar el día">
-                    <header>
-                      <h4>Armar {{ day.label.toLowerCase() }}</h4>
-                      <button class="icon-ghost" type="button" (click)="closeDayEditor()" aria-label="Cerrar editor">
-                        <app-icon name="x" [size]="16" />
+                  <!-- Armar el día: varios ejercicios a la vez y un solo «Guardar plan» -->
+                  <section class="builder" aria-label="Armar el día">
+                    <div class="builder__bar">
+                      <button class="text-button" type="button" (click)="cancelDayEditor()" [disabled]="daySaving()">
+                        Cancelar
                       </button>
-                    </header>
-
-                    <label class="dark-field">
-                      <span>Nombre del día</span>
-                      <input
-                        type="text"
-                        maxlength="60"
-                        placeholder="Ej. Empuje, Pierna, Torso…"
-                        [value]="dayTitle()"
-                        (input)="dayTitle.set($any($event.target).value)"
-                      />
-                    </label>
-
-                    <p class="dark-label">Músculos que se entrenan este día</p>
-                    <p class="dark-hint">Tócalos en la lista o directamente en el cuerpo 3D de la derecha.</p>
-                    <app-muscle-picker
-                      [selected]="dayMuscles()"
-                      [showBody]="false"
-                      (selectedChange)="dayMuscles.set($event)"
-                    />
-                    <div class="day-editor__save">
-                      <button class="lime-button" type="button" (click)="saveDay()" [disabled]="daySaving()">
-                        {{ daySaving() ? 'Guardando…' : 'Guardar día' }}
-                      </button>
+                      <span class="builder__plan">
+                        {{ plan.nombre }}
+                        <app-icon name="wrench" [size]="15" />
+                      </span>
                     </div>
 
-                    @if (canManageRows()) {
-                      <form class="add-exercise" [formGroup]="exerciseForm" (ngSubmit)="addExercise()" novalidate>
-                        <p class="dark-label">Agregar ejercicio al {{ day.label.toLowerCase() }}</p>
-                        @if (exerciseError()) {
-                          <p class="dark-error" role="alert">{{ exerciseError() }}</p>
-                        }
-                        @if (exercises().length === 0) {
-                          <p class="dark-hint">
-                            No hay ejercicios en el catálogo. Créalos en «Ejercicios» (con su imagen) y vuelve aquí.
-                          </p>
-                        } @else {
-                          <div class="add-exercise__grid">
-                            <label class="dark-field dark-field--wide" [class.has-error]="exerciseFieldError('ejercicio')">
-                              <span>Ejercicio</span>
-                              @if (exerciseFieldError('ejercicio'); as message) {
-                                <em class="dark-error">{{ message }}</em>
-                              }
-                              <input
-                                type="search"
-                                placeholder="Filtrar por nombre"
-                                [value]="exerciseSearch()"
-                                (input)="exerciseSearch.set($any($event.target).value)"
-                              />
-                              <select formControlName="ejercicio">
-                                <option [ngValue]="0">Elige un ejercicio…</option>
-                                @for (exercise of exerciseOptions(); track exercise.id) {
-                                  <option [ngValue]="exercise.id">
-                                    {{ exercise.nombre }}{{ exercise.musculos.length ? ' — ' + exercise.musculos.map(muscleLabel).join(', ') : '' }}
-                                  </option>
-                                }
-                              </select>
-                            </label>
-                            <label class="dark-field" [class.has-error]="exerciseFieldError('series')">
-                              <span>Series</span>
-                              @if (exerciseFieldError('series'); as message) { <em class="dark-error">{{ message }}</em> }
-                              <input type="number" min="1" formControlName="series" />
-                            </label>
-                            <label class="dark-field" [class.has-error]="exerciseFieldError('repeticiones')">
-                              <span>Repeticiones</span>
-                              @if (exerciseFieldError('repeticiones'); as message) { <em class="dark-error">{{ message }}</em> }
-                              <input type="number" min="1" formControlName="repeticiones" />
-                            </label>
-                            <label class="dark-field">
-                              <span>Peso (kg)</span>
-                              <input type="number" min="0" step="0.5" formControlName="peso_kg" placeholder="Opcional" />
-                            </label>
-                            <label class="dark-field" [class.has-error]="exerciseFieldError('descanso_segundos')">
-                              <span>Descanso (s)</span>
-                              @if (exerciseFieldError('descanso_segundos'); as message) { <em class="dark-error">{{ message }}</em> }
-                              <input type="number" min="0" step="15" formControlName="descanso_segundos" />
-                            </label>
-                            <label class="dark-field dark-field--wide">
-                              <span>Indicaciones</span>
-                              <input type="text" formControlName="observaciones" placeholder="Ej. bajar lento, codos a 45°" />
-                            </label>
-                          </div>
-                          <button class="save-plan" type="submit" [disabled]="exerciseSaving()">
-                            <app-icon name="plus" [size]="17" />
-                            {{ exerciseSaving() ? 'Agregando…' : 'Agregar ejercicio' }}
+                    <div class="builder__head">
+                      <div class="builder__heading">
+                        <div class="builder__title-row">
+                          <input
+                            class="builder__title"
+                            type="text"
+                            maxlength="60"
+                            [placeholder]="day.label"
+                            [value]="dayTitle()"
+                            (input)="dayTitle.set($any($event.target).value)"
+                            aria-label="Nombre del día"
+                          />
+                          <button
+                            class="more-button"
+                            type="button"
+                            [class.is-active]="musclesOpen()"
+                            (click)="musclesOpen.set(!musclesOpen())"
+                            [attr.aria-expanded]="musclesOpen()"
+                            aria-label="Músculos del día"
+                          >
+                            <app-icon name="more" [size]="18" />
                           </button>
+                        </div>
+                        <p class="builder__meta">
+                          {{ day.label }} · Día {{ day.index + 1 }} · {{ draft().length }}
+                          {{ draft().length === 1 ? 'ejercicio' : 'ejercicios' }} · {{ draftSets() }} series
+                        </p>
+                      </div>
+                    </div>
+
+                    @if (musclesOpen()) {
+                      <div class="builder__muscles">
+                        <p class="dark-hint">Marca los músculos del día aquí o en el cuerpo 3D. Al agregar ejercicios se marcan solos.</p>
+                        <app-muscle-picker
+                          [selected]="dayMuscles()"
+                          [showBody]="false"
+                          (selectedChange)="dayMuscles.set($event)"
+                        />
+                      </div>
+                    } @else if (dayMuscles().length) {
+                      <div class="muscle-tags" aria-label="Músculos del día">
+                        @for (code of dayMuscles(); track code) {
+                          <span class="muscle-tag">{{ muscleLabel(code) }}</span>
                         }
-                      </form>
+                      </div>
                     }
+
+                    @if (editorError()) {
+                      <p class="builder__error" role="alert">
+                        <app-icon name="alert" [size]="16" /> {{ editorError() }}
+                      </p>
+                    }
+
+                    @if (draft().length) {
+                      <ol class="builder-list">
+                        @for (row of draft(); track row.key; let i = $index, first = $first, last = $last) {
+                          <li class="builder-row" [class.has-error]="rowErrors()[i]">
+                            <app-exercise-thumb
+                              [path]="apiPath(row.exercise.imagen_url)"
+                              [version]="row.exercise.updated_at"
+                              [name]="row.exercise.nombre"
+                              [size]="72"
+                            />
+                            <div class="builder-row__body">
+                              <div class="builder-row__top">
+                                <div class="builder-row__name">
+                                  <strong>{{ row.exercise.nombre }}</strong>
+                                  <span>{{ exerciseSubtitle(row.exercise) }}</span>
+                                </div>
+                                <div class="builder-row__tools">
+                                  <button
+                                    class="tool-button tool-button--up"
+                                    type="button"
+                                    [disabled]="first"
+                                    (click)="moveRow(i, -1)"
+                                    [attr.aria-label]="'Subir ' + row.exercise.nombre"
+                                  >
+                                    <app-icon name="chevron-down" [size]="15" />
+                                  </button>
+                                  <button
+                                    class="tool-button"
+                                    type="button"
+                                    [disabled]="last"
+                                    (click)="moveRow(i, 1)"
+                                    [attr.aria-label]="'Bajar ' + row.exercise.nombre"
+                                  >
+                                    <app-icon name="chevron-down" [size]="15" />
+                                  </button>
+                                  <button
+                                    class="tool-button"
+                                    type="button"
+                                    [class.is-active]="row.expanded"
+                                    (click)="toggleRowDetails(i)"
+                                    [attr.aria-expanded]="row.expanded"
+                                    [attr.aria-label]="'Más opciones de ' + row.exercise.nombre"
+                                  >
+                                    <app-icon name="more" [size]="15" />
+                                  </button>
+                                  <button
+                                    class="tool-button tool-button--danger"
+                                    type="button"
+                                    (click)="removeRow(i)"
+                                    [attr.aria-label]="'Quitar ' + row.exercise.nombre"
+                                  >
+                                    <app-icon name="x" [size]="15" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div class="chips">
+                                <label class="chip" [class.is-invalid]="!inRange(row.series, 'series')">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="20"
+                                    inputmode="numeric"
+                                    [value]="row.series ?? ''"
+                                    (input)="setNumber(i, 'series', $any($event.target).value)"
+                                    [attr.aria-label]="'Series de ' + row.exercise.nombre"
+                                  />
+                                  <span>series</span>
+                                </label>
+                                <label class="chip" [class.is-invalid]="!inRange(row.repeticiones, 'repeticiones')">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="200"
+                                    inputmode="numeric"
+                                    [value]="row.repeticiones ?? ''"
+                                    (input)="setNumber(i, 'repeticiones', $any($event.target).value)"
+                                    [attr.aria-label]="'Repeticiones de ' + row.exercise.nombre"
+                                  />
+                                  <span>reps</span>
+                                </label>
+                                @if (!row.expanded && (row.peso_kg || row.descanso_segundos)) {
+                                  <span class="chip chip--soft">
+                                    {{ row.peso_kg ? row.peso_kg + ' kg' : '' }}{{ row.peso_kg && row.descanso_segundos ? ' · ' : '' }}{{ row.descanso_segundos ? row.descanso_segundos + ' s' : '' }}
+                                  </span>
+                                }
+                              </div>
+                              @if (row.expanded) {
+                                <div class="builder-row__extra">
+                                  <label class="dark-field">
+                                    <span>Peso (kg)</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.5"
+                                      placeholder="Opcional"
+                                      [value]="row.peso_kg"
+                                      (input)="setText(i, 'peso_kg', $any($event.target).value)"
+                                    />
+                                  </label>
+                                  <label class="dark-field" [class.has-error]="!inRange(row.descanso_segundos, 'descanso_segundos')">
+                                    <span>Descanso (s)</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="900"
+                                      step="15"
+                                      [value]="row.descanso_segundos ?? ''"
+                                      (input)="setNumber(i, 'descanso_segundos', $any($event.target).value)"
+                                    />
+                                  </label>
+                                  <label class="dark-field dark-field--wide">
+                                    <span>Indicaciones</span>
+                                    <input
+                                      type="text"
+                                      maxlength="1000"
+                                      placeholder="Ej. bajar lento, codos a 45°"
+                                      [value]="row.observaciones"
+                                      (input)="setText(i, 'observaciones', $any($event.target).value)"
+                                    />
+                                  </label>
+                                </div>
+                              }
+                              @if (rowErrors()[i]; as message) {
+                                <p class="dark-error" role="alert">{{ message }}</p>
+                              }
+                            </div>
+                          </li>
+                        }
+                      </ol>
+                    } @else {
+                      <div class="rest-day">
+                        <strong>Sin ejercicios todavía</strong>
+                        <span>Usa «Agregar ejercicios» para elegir varios a la vez. Si guardas el día vacío, queda de descanso.</span>
+                      </div>
+                    }
+
+                    @if (exercises().length) {
+                      <button
+                        class="add-many"
+                        type="button"
+                        (click)="openPicker()"
+                        [disabled]="draft().length >= maxExercises"
+                      >
+                        <app-icon name="plus" [size]="17" />
+                        {{ draft().length >= maxExercises ? 'Máximo ' + maxExercises + ' ejercicios por día' : 'Agregar ejercicios' }}
+                      </button>
+                    } @else {
+                      <p class="dark-hint">
+                        No hay ejercicios en el catálogo. Créalos en «Ejercicios» (con su imagen) y vuelve aquí.
+                      </p>
+                    }
+
+                    <div class="builder__save">
+                      <button class="save-plan" type="button" (click)="saveDayPlan()" [disabled]="daySaving()">
+                        <app-icon name="clipboard" [size]="18" />
+                        {{ daySaving() ? 'Guardando…' : 'Guardar plan' }}
+                      </button>
+                    </div>
                   </section>
+                } @else {
+                  <div class="day-head">
+                    <div>
+                      <h3>{{ day.title }}</h3>
+                      <p>
+                        {{ day.label }} · Día {{ day.index + 1 }} · {{ day.rows.length }}
+                        {{ day.rows.length === 1 ? 'ejercicio' : 'ejercicios' }} · {{ day.sets }} series
+                      </p>
+                    </div>
+                    @if (canBuildDays()) {
+                      <button class="blue-button" type="button" (click)="openDayEditor()">
+                        <app-icon name="edit" [size]="15" /> Armar {{ day.label.toLowerCase() }}
+                      </button>
+                    }
+                  </div>
+
+                  @if (day.muscles.length) {
+                    <div class="muscle-tags" aria-label="Músculos del día">
+                      @for (code of day.muscles; track code) {
+                        <span class="muscle-tag">{{ muscleLabel(code) }}</span>
+                      }
+                    </div>
+                  }
+
+                  @if (exerciseLoading()) {
+                    <div class="loading-state"><span class="spinner"></span><span>Cargando ejercicios...</span></div>
+                  } @else if (day.rows.length === 0) {
+                    <div class="rest-day">
+                      <strong>{{ day.muscles.length ? 'Aún sin ejercicios' : 'Día de descanso' }}</strong>
+                      <span>
+                        @if (isClient()) {
+                          {{ day.muscles.length ? 'Tu entrenador agregará los ejercicios.' : 'Recupera, hidrátate y duerme bien.' }}
+                        } @else {
+                          Abre «Armar {{ day.label.toLowerCase() }}» para agregar varios ejercicios a la vez.
+                        }
+                      </span>
+                    </div>
+                  } @else {
+                    <ol class="exercise-list">
+                      @for (row of day.rows; track row.id) {
+                        <li class="exercise-row">
+                          <app-exercise-thumb
+                            [path]="apiPath(row.ejercicio_detalle.imagen_url)"
+                            [version]="row.ejercicio_detalle.updated_at"
+                            [name]="row.ejercicio_detalle.nombre"
+                            [size]="76"
+                          />
+                          <div class="exercise-row__info">
+                            <strong>{{ row.ejercicio_detalle.nombre }}</strong>
+                            <span class="exercise-row__muscles">
+                              {{ row.ejercicio_detalle.musculos.length
+                                ? row.ejercicio_detalle.musculos.map(muscleLabel).join(' · ')
+                                : (row.ejercicio_detalle.grupo_muscular || 'Sin músculos marcados') }}
+                            </span>
+                            <div class="pills">
+                              @if (row.series) { <span class="pill">{{ row.series }} series</span> }
+                              @if (row.repeticiones) { <span class="pill">{{ row.repeticiones }} reps</span> }
+                              @if (row.peso_kg) { <span class="pill">{{ kg(row.peso_kg) }} kg</span> }
+                              @if (row.descanso_segundos) { <span class="pill pill--soft">{{ row.descanso_segundos }} s descanso</span> }
+                            </div>
+                            @if (row.observaciones) {
+                              <p class="exercise-row__note">{{ row.observaciones }}</p>
+                            }
+                          </div>
+                        </li>
+                      }
+                    </ol>
+                  }
                 }
               </div>
 
@@ -330,6 +447,100 @@
     </div>
   }
 </div>
+
+<!-- Selector múltiple: agregar varios ejercicios al día de una vez -->
+<app-modal
+  [open]="pickerOpen()"
+  title="Agregar ejercicios"
+  [subtitle]="'Marca todos los que quieras y se agregan juntos al ' + currentDay().label.toLowerCase() + '.'"
+  size="wide"
+  (closed)="closePicker()"
+>
+  <div class="picker-tools">
+    <div class="search-box picker-search">
+      <app-icon name="search" [size]="16" />
+      <input
+        type="search"
+        placeholder="Buscar ejercicio"
+        [value]="exerciseSearch()"
+        (input)="exerciseSearch.set($any($event.target).value)"
+        aria-label="Buscar ejercicio"
+      />
+    </div>
+    <label class="picker-default">
+      <span>Series</span>
+      <input
+        type="number"
+        min="1"
+        max="20"
+        [value]="pickerSets() ?? ''"
+        (input)="setPickerNumber('sets', $any($event.target).value)"
+      />
+    </label>
+    <label class="picker-default">
+      <span>Reps</span>
+      <input
+        type="number"
+        min="1"
+        max="200"
+        [value]="pickerReps() ?? ''"
+        (input)="setPickerNumber('reps', $any($event.target).value)"
+      />
+    </label>
+  </div>
+  <p class="picker-hint">
+    Primero aparecen los que trabajan los músculos marcados del día. Las series y repeticiones se aplican a los que
+    agregues ahora; luego puedes ajustar cada uno.
+  </p>
+
+  <div class="picker-grid" role="list">
+    @for (exercise of exerciseOptions(); track exercise.id) {
+      <button
+        type="button"
+        role="listitem"
+        class="picker-card"
+        [class.is-picked]="pickedSet().has(exercise.id)"
+        [attr.aria-pressed]="pickedSet().has(exercise.id)"
+        (click)="togglePick(exercise.id)"
+      >
+        <app-exercise-thumb
+          [path]="apiPath(exercise.imagen_url)"
+          [version]="exercise.updated_at"
+          [name]="exercise.nombre"
+          [size]="56"
+        />
+        <span class="picker-card__text">
+          <strong>{{ exercise.nombre }}</strong>
+          <small>{{ exerciseSubtitle(exercise) }}</small>
+          @if (draftCounts().get(exercise.id); as count) {
+            <em>Ya en el día{{ count > 1 ? ' (' + count + ')' : '' }}</em>
+          }
+        </span>
+        <span class="picker-card__check" aria-hidden="true">
+          @if (pickedSet().has(exercise.id)) {
+            <app-icon name="check" [size]="15" />
+          }
+        </span>
+      </button>
+    } @empty {
+      <p class="picker-empty">Ningún ejercicio coincide con la búsqueda.</p>
+    }
+  </div>
+
+  <div class="form-actions picker-actions">
+    <span class="picker-count">
+      {{ pickerSelected().length }} {{ pickerSelected().length === 1 ? 'seleccionado' : 'seleccionados' }}
+      @if (pickerSelected().length > pickerRoom()) {
+        · solo caben {{ pickerRoom() }} más (máximo {{ maxExercises }} por día)
+      }
+    </span>
+    <button class="button button--secondary" type="button" (click)="closePicker()">Cancelar</button>
+    <button class="button button--primary" type="button" (click)="addPicked()" [disabled]="!pickerSelected().length">
+      <app-icon name="plus" [size]="16" />
+      Agregar {{ pickerSelected().length || '' }} {{ pickerSelected().length === 1 ? 'ejercicio' : 'ejercicios' }}
+    </button>
+  </div>
+</app-modal>
 
 <!-- Crear / editar plan -->
 <app-modal

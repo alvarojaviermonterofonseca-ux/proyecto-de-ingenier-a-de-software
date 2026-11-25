@@ -94,6 +94,7 @@ from .serializers import (
     ClienteSerializer,
     ClienteTerapeutaSerializer,
     ComidaSerializer,
+    DiaPlanEntrenamientoSerializer,
     EjercicioSerializer,
     EntrenadorSerializer,
     EntrenamientoSerializer,
@@ -2306,9 +2307,84 @@ class PlanEntrenamientoViewSet(ViewSetBase):
     queryset = PlanEntrenamiento.objects.select_related("cliente__usuario", "entrenador__usuario")
     serializer_class = PlanEntrenamientoSerializer
     recurso_permiso = "planes-entrenamiento"
+    accion_permiso_por_accion = {"dia": "edit"}
     filterset_fields = ("cliente", "entrenador", "activo")
     search_fields = ("nombre", "objetivo")
     ordering_fields = ("fecha_inicio", "fecha_fin", "created_at")
+
+    # Reemplazar las filas de un día equivale a editar sus ejercicios.
+    PERMISO_FILAS_DIA = "planes-entrenamiento-ejercicios:edit"
+
+    @extend_schema(
+        request=DiaPlanEntrenamientoSerializer,
+        responses={200: OpenApiResponse(description="Plan actualizado y ejercicios del día en orden.")},
+        description=(
+            "Guarda de una sola vez el día de un plan: título, músculos y la lista ordenada de "
+            "ejercicios con sus series y repeticiones. Las filas anteriores del día se reemplazan "
+            "en una transacción. Requiere planes-entrenamiento:edit y "
+            "planes-entrenamiento-ejercicios:edit."
+        ),
+    )
+    @action(detail=True, methods=["put"], url_path=r"dias/(?P<dia>[a-z]+)")
+    def dia(self, request, pk=None, dia=None):
+        if dia not in PlanEntrenamiento.DIAS:
+            raise NotFound("Día no válido.")
+        actor = request.user
+        if not es_administrador(actor) and not (
+            isinstance(actor, Usuario) and actor.tiene_permiso(self.PERMISO_FILAS_DIA)
+        ):
+            raise PermissionDenied("No tienes permiso para editar los ejercicios del plan.")
+        plan = self.get_object()
+        if isinstance(actor, Usuario) and not clientes_clinicos(actor).filter(pk=plan.cliente_id).exists():
+            raise PermissionDenied("El plan no pertenece a su alcance de acceso.")
+
+        entrada = DiaPlanEntrenamientoSerializer(data=request.data, context=self.get_serializer_context())
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+        gimnasio_plan = plan.cliente.usuario.gimnasio_id
+        for posicion, fila in enumerate(datos["ejercicios"]):
+            # El personal de plataforma ve todos los catálogos: el ejercicio
+            # debe ser del mismo gimnasio que el plan.
+            if fila["ejercicio"].gimnasio_id != gimnasio_plan:
+                raise ValidationError(
+                    {"ejercicios": {posicion: {"ejercicio": "El ejercicio no pertenece al gimnasio del plan."}}}
+                )
+
+        with transaction.atomic():
+            plan = PlanEntrenamiento.objects.select_for_update().get(pk=plan.pk)
+            if "titulo" in datos or "musculos" in datos:
+                anterior = (plan.rutina or {}).get(dia) or {}
+                rutina = dict(plan.rutina or {})
+                rutina[dia] = {
+                    "titulo": datos.get("titulo", anterior.get("titulo", "")),
+                    "musculos": datos.get("musculos", anterior.get("musculos", [])),
+                }
+                plan.rutina = rutina
+                try:
+                    plan.save(validar=True)
+                except DjangoValidationError as error:
+                    raise ValidationError(
+                        getattr(error, "message_dict", None) or {"rutina": error.messages}
+                    ) from error
+            plan.ejercicios_planificados.filter(dia_semana=dia).delete()
+            PlanEntrenamientoEjercicio.objects.bulk_create(
+                PlanEntrenamientoEjercicio(plan=plan, dia_semana=dia, orden=orden, **fila)
+                for orden, fila in enumerate(datos["ejercicios"], start=1)
+            )
+            self.registrar_evento("armar-dia", plan, {"dia": dia, "ejercicios": len(datos["ejercicios"])})
+
+        filas = (
+            plan.ejercicios_planificados.filter(dia_semana=dia)
+            .select_related("ejercicio")
+            .order_by("orden", "pk")
+        )
+        contexto = self.get_serializer_context()
+        return Response(
+            {
+                "plan": PlanEntrenamientoSerializer(plan, context=contexto).data,
+                "ejercicios": PlanEntrenamientoEjercicioSerializer(filas, many=True, context=contexto).data,
+            }
+        )
 
     def filtrar_alcance(self, queryset):
         return filtrar_clientes(queryset, "cliente", self.request.user)

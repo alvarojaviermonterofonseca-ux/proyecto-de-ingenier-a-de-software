@@ -8,6 +8,8 @@ import type {
   ClientTrainerAssignment,
   Exercise,
   TrainingDay,
+  TrainingDayExerciseInput,
+  TrainingDaySaveResponse,
   TrainingPlan,
   TrainingPlanExercise,
   WeekDay,
@@ -39,6 +41,28 @@ interface DayView {
   rows: TrainingPlanExercise[];
   sets: number;
 }
+
+/** Ejercicio del día mientras el entrenador lo arma (aún sin guardar). */
+interface DraftRow {
+  key: number;
+  exercise: Exercise;
+  series: number | null;
+  repeticiones: number | null;
+  peso_kg: string;
+  descanso_segundos: number | null;
+  observaciones: string;
+  expanded: boolean;
+}
+
+type DraftNumberField = 'series' | 'repeticiones' | 'descanso_segundos';
+
+const LIMITES: Record<DraftNumberField, { min: number; max: number }> = {
+  series: { min: 1, max: 20 },
+  repeticiones: { min: 1, max: 200 },
+  descanso_segundos: { min: 0, max: 900 },
+};
+
+const MAX_EJERCICIOS_DIA = 30;
 
 @Component({
   selector: 'app-training-plans-page',
@@ -86,14 +110,29 @@ export class TrainingPlansPage implements OnInit {
   protected readonly planExercises = signal<TrainingPlanExercise[]>([]);
   protected readonly exerciseLoading = signal(false);
 
-  /** Editor del día: título, músculos y alta de ejercicios. */
+  /**
+   * Editor del día: el entrenador arma un borrador con varios ejercicios
+   * (series y repeticiones de cada uno) y lo guarda completo con un solo botón.
+   */
   protected readonly dayEditorOpen = signal(false);
   protected readonly dayTitle = signal('');
   protected readonly dayMuscles = signal<string[]>([]);
+  protected readonly musclesOpen = signal(false);
+  protected readonly draft = signal<DraftRow[]>([]);
   protected readonly daySaving = signal(false);
-  protected readonly exerciseSaving = signal(false);
-  protected readonly exerciseError = signal<string | null>(null);
+  protected readonly editorError = signal<string | null>(null);
+  /** Errores del servidor por posición de la fila en el borrador. */
+  protected readonly rowErrors = signal<Record<number, string>>({});
+  private draftSnapshot = '';
+  private nextKey = 1;
+
+  /** Selector múltiple del catálogo de ejercicios. */
+  protected readonly pickerOpen = signal(false);
+  protected readonly pickerSelected = signal<number[]>([]);
+  protected readonly pickerSets = signal<number | null>(3);
+  protected readonly pickerReps = signal<number | null>(10);
   protected readonly exerciseSearch = signal('');
+  protected readonly maxExercises = MAX_EJERCICIOS_DIA;
 
   protected readonly muscleLabel = muscleLabel;
   protected readonly apiPath = apiPath;
@@ -102,8 +141,12 @@ export class TrainingPlansPage implements OnInit {
   protected readonly isTrainer = computed(() => this.auth.roleName() === 'entrenador');
   protected readonly canCreate = computed(() => this.auth.hasPermission('planes-entrenamiento:create'));
   protected readonly canEditPlan = computed(() => this.auth.hasPermission('planes-entrenamiento:edit'));
-  protected readonly canManageRows = computed(() =>
-    this.auth.hasPermission('planes-entrenamiento-ejercicios:create'),
+  /** Armar un día reemplaza sus filas: el servidor exige editar plan y filas. */
+  protected readonly canBuildDays = computed(
+    () =>
+      !this.isClient() &&
+      this.auth.hasPermission('planes-entrenamiento:edit') &&
+      this.auth.hasPermission('planes-entrenamiento-ejercicios:edit'),
   );
   protected readonly canDeletePlan = computed(() => this.auth.hasPermission('planes-entrenamiento:delete'));
 
@@ -164,6 +207,29 @@ export class TrainingPlansPage implements OnInit {
       });
   });
 
+  protected readonly draftSets = computed(() =>
+    this.draft().reduce((total, row) => total + (row.series ?? 0), 0),
+  );
+
+  protected readonly draftValid = computed(() =>
+    this.draft().every(
+      (row) =>
+        this.inRange(row.series, 'series') &&
+        this.inRange(row.repeticiones, 'repeticiones') &&
+        this.inRange(row.descanso_segundos, 'descanso_segundos') &&
+        (row.peso_kg === '' || Number(row.peso_kg) >= 0),
+    ),
+  );
+
+  protected readonly pickedSet = computed(() => new Set(this.pickerSelected()));
+
+  /** Cuántas veces está cada ejercicio en el borrador (para marcarlo en el selector). */
+  protected readonly draftCounts = computed(() => {
+    const counts = new Map<number, number>();
+    for (const row of this.draft()) counts.set(row.exercise.id, (counts.get(row.exercise.id) ?? 0) + 1);
+    return counts;
+  });
+
   /** Entrenadores asignados al cliente elegido en el formulario. */
   protected readonly trainerOptions = computed(() => {
     const clientId = Number(this.clientValue());
@@ -182,15 +248,6 @@ export class TrainingPlansPage implements OnInit {
     fecha_inicio: [localDateString(new Date()), [Validators.required]],
     fecha_fin: [''],
     activo: [true],
-    observaciones: [''],
-  });
-
-  protected readonly exerciseForm = this.formBuilder.nonNullable.group({
-    ejercicio: [0, [Validators.required, Validators.min(1)]],
-    series: [3, [Validators.min(1), Validators.max(20)]],
-    repeticiones: [10, [Validators.min(1), Validators.max(200)]],
-    peso_kg: [''],
-    descanso_segundos: [60, [Validators.min(0), Validators.max(900)]],
     observaciones: [''],
   });
 
@@ -246,9 +303,18 @@ export class TrainingPlansPage implements OnInit {
     this.loadPlanExercises(plan.id, true);
   }
 
-  protected selectDay(day: WeekDay): void {
+  /** Cambiar de plan desde la lista pide confirmar si hay un día sin guardar. */
+  protected async choosePlan(plan: TrainingPlan): Promise<void> {
+    if (plan.id === this.selectedId() || !(await this.confirmDiscard())) return;
+    this.selectPlan(plan);
+  }
+
+  protected async selectDay(day: WeekDay): Promise<void> {
+    if (day === this.selectedDay()) return;
+    const editing = this.dayEditorOpen();
+    if (editing && !(await this.confirmDiscard())) return;
     this.selectedDay.set(day);
-    if (this.dayEditorOpen()) this.openDayEditor();
+    if (editing) this.openDayEditor();
   }
 
   private loadPlanExercises(planId: number, pickDay = false): void {
@@ -431,115 +497,254 @@ export class TrainingPlansPage implements OnInit {
     });
   }
 
-  // ----- Editor del día -----
+  // ----- Editor del día (entrenador / administrador) -----
 
   protected openDayEditor(): void {
     const plan = this.selectedPlan();
     const config = plan?.rutina?.[this.selectedDay()];
     this.dayTitle.set(config?.titulo ?? '');
     this.dayMuscles.set([...(config?.musculos ?? [])]);
-    this.exerciseError.set(null);
-    this.exerciseSearch.set('');
-    this.exerciseForm.reset({
-      ejercicio: 0,
-      series: 3,
-      repeticiones: 10,
-      peso_kg: '',
-      descanso_segundos: 60,
-      observaciones: '',
-    });
+    this.draft.set(this.currentDay().rows.map((row) => this.rowFromPlan(row)));
+    this.draftSnapshot = this.serializeDraft();
+    this.editorError.set(null);
+    this.rowErrors.set({});
+    this.musclesOpen.set(false);
     this.dayEditorOpen.set(true);
   }
 
-  protected closeDayEditor(): void {
+  /** «Cancelar»: descarta el borrador (pide confirmación si hubo cambios). */
+  protected async cancelDayEditor(): Promise<void> {
+    if (this.daySaving() || !(await this.confirmDiscard())) return;
     this.dayEditorOpen.set(false);
+    this.pickerOpen.set(false);
   }
 
-  protected saveDay(): void {
-    const plan = this.selectedPlan();
-    if (!plan) return;
-    const rutina = { ...(plan.rutina ?? {}) };
-    const title = this.dayTitle().trim();
-    if (title || this.dayMuscles().length) {
-      rutina[this.selectedDay()] = { titulo: title, musculos: this.dayMuscles() };
-    } else {
-      delete rutina[this.selectedDay()];
-    }
-    this.daySaving.set(true);
-    this.api.patch<TrainingPlan>(`planes-entrenamiento/${plan.id}/`, { rutina }).subscribe({
-      next: (updated) => {
-        this.daySaving.set(false);
-        this.plans.update((plans) => plans.map((item) => (item.id === updated.id ? updated : item)));
-        this.toast.success('Día guardado', `${this.currentDay().label}: ${title || 'sin título'}`);
-      },
-      error: (error: unknown) => {
-        this.daySaving.set(false);
-        const fields = erroresDelServidor(error);
-        this.toast.error('No se pudo guardar el día', fields['rutina'] ?? (error instanceof ApiError ? error.message : undefined));
-      },
+  private async confirmDiscard(): Promise<boolean> {
+    if (!this.dayEditorOpen() || this.serializeDraft() === this.draftSnapshot) return true;
+    return this.confirm.confirm({
+      title: 'Descartar cambios',
+      message: `Los cambios del ${this.currentDay().label.toLowerCase()} que no guardaste se perderán.`,
+      confirmLabel: 'Descartar',
     });
   }
 
-  protected exerciseFieldError(name: keyof typeof this.exerciseForm.controls): string | null {
-    const control = this.exerciseForm.controls[name];
-    if (!control.touched || control.valid) return null;
-    if (name === 'ejercicio') return 'Elige el ejercicio.';
-    return mensajeValidacion(control);
+  private rowFromPlan(row: TrainingPlanExercise): DraftRow {
+    return {
+      key: this.nextKey++,
+      exercise: row.ejercicio_detalle,
+      series: row.series,
+      repeticiones: row.repeticiones,
+      peso_kg: row.peso_kg === null ? '' : this.kg(row.peso_kg),
+      descanso_segundos: row.descanso_segundos,
+      observaciones: row.observaciones ?? '',
+      expanded: false,
+    };
   }
 
-  protected addExercise(): void {
+  private serializeDraft(): string {
+    return JSON.stringify({
+      titulo: this.dayTitle().trim(),
+      musculos: [...this.dayMuscles()].sort(),
+      ejercicios: this.draftPayload(),
+    });
+  }
+
+  private draftPayload(): TrainingDayExerciseInput[] {
+    return this.draft().map((row) => ({
+      ejercicio: row.exercise.id,
+      series: row.series,
+      repeticiones: row.repeticiones,
+      peso_kg: row.peso_kg === '' ? null : row.peso_kg,
+      descanso_segundos: row.descanso_segundos,
+      observaciones: row.observaciones.trim() || null,
+    }));
+  }
+
+  protected inRange(value: number | null, field: DraftNumberField): boolean {
+    if (value === null) return true;
+    const { min, max } = LIMITES[field];
+    return Number.isInteger(value) && value >= min && value <= max;
+  }
+
+  protected setNumber(index: number, field: DraftNumberField, raw: string): void {
+    const value = raw.trim() === '' ? null : Number(raw);
+    this.patchRow(index, { [field]: Number.isNaN(value) ? null : value });
+  }
+
+  protected setText(index: number, field: 'peso_kg' | 'observaciones', value: string): void {
+    this.patchRow(index, { [field]: value });
+  }
+
+  private patchRow(index: number, patch: Partial<DraftRow>): void {
+    this.draft.update((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+    if (this.rowErrors()[index]) {
+      this.rowErrors.update((errors) => {
+        const copy = { ...errors };
+        delete copy[index];
+        return copy;
+      });
+    }
+  }
+
+  protected toggleRowDetails(index: number): void {
+    const row = this.draft()[index];
+    if (row) this.patchRow(index, { expanded: !row.expanded });
+  }
+
+  protected moveRow(index: number, delta: -1 | 1): void {
+    const target = index + delta;
+    this.draft.update((rows) => {
+      if (target < 0 || target >= rows.length) return rows;
+      const copy = [...rows];
+      [copy[index], copy[target]] = [copy[target], copy[index]];
+      return copy;
+    });
+    this.rowErrors.set({});
+  }
+
+  protected removeRow(index: number): void {
+    this.draft.update((rows) => rows.filter((_, i) => i !== index));
+    this.rowErrors.set({});
+  }
+
+  // ----- Selector múltiple de ejercicios -----
+
+  protected openPicker(): void {
+    this.pickerSelected.set([]);
+    this.exerciseSearch.set('');
+    this.pickerOpen.set(true);
+  }
+
+  protected closePicker(): void {
+    this.pickerOpen.set(false);
+  }
+
+  protected togglePick(id: number): void {
+    this.pickerSelected.update((ids) => (ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]));
+  }
+
+  protected setPickerNumber(target: 'sets' | 'reps', raw: string): void {
+    const value = raw.trim() === '' ? null : Number(raw);
+    const clean = value === null || Number.isNaN(value) ? null : value;
+    (target === 'sets' ? this.pickerSets : this.pickerReps).set(clean);
+  }
+
+  protected readonly pickerRoom = computed(() => MAX_EJERCICIOS_DIA - this.draft().length);
+
+  /** Agrega todos los ejercicios marcados al final del día, en el orden en que se marcaron. */
+  protected addPicked(): void {
+    const byId = new Map(this.exercises().map((exercise) => [exercise.id, exercise]));
+    const picked = this.pickerSelected()
+      .map((id) => byId.get(id))
+      .filter((exercise): exercise is Exercise => !!exercise)
+      .slice(0, Math.max(this.pickerRoom(), 0));
+    if (!picked.length) return;
+    const series = this.inRange(this.pickerSets(), 'series') ? this.pickerSets() : 3;
+    const repeticiones = this.inRange(this.pickerReps(), 'repeticiones') ? this.pickerReps() : 10;
+    this.draft.update((rows) => [
+      ...rows,
+      ...picked.map(
+        (exercise): DraftRow => ({
+          key: this.nextKey++,
+          exercise,
+          series,
+          repeticiones,
+          peso_kg: '',
+          descanso_segundos: 60,
+          observaciones: '',
+          expanded: false,
+        }),
+      ),
+    ]);
+    // Los músculos de los ejercicios nuevos se marcan en el día (se pueden desmarcar).
+    this.dayMuscles.update((muscles) => [
+      ...new Set([...muscles, ...picked.flatMap((exercise) => exercise.musculos ?? [])]),
+    ]);
+    this.pickerOpen.set(false);
+    this.toast.success(
+      picked.length === 1 ? 'Ejercicio agregado' : `${picked.length} ejercicios agregados`,
+      'Ajusta series y repeticiones y pulsa «Guardar plan».',
+    );
+  }
+
+  // ----- Guardar el día completo -----
+
+  protected saveDayPlan(): void {
     const plan = this.selectedPlan();
-    this.exerciseError.set(null);
-    if (!plan || this.exerciseForm.invalid) {
-      this.exerciseForm.markAllAsTouched();
+    if (!plan || this.daySaving()) return;
+    this.editorError.set(null);
+    this.rowErrors.set({});
+    if (!this.draftValid()) {
+      this.editorError.set('Revisa las series y repeticiones marcadas en rojo.');
       return;
     }
-    const raw = this.exerciseForm.getRawValue();
-    const dayRows = this.currentDay().rows;
-    const payload = {
-      plan: plan.id,
-      ejercicio: Number(raw.ejercicio),
-      dia_semana: this.selectedDay(),
-      orden: dayRows.length ? Math.max(...dayRows.map((row) => row.orden)) + 1 : 1,
-      series: raw.series || null,
-      repeticiones: raw.repeticiones || null,
-      peso_kg: raw.peso_kg === '' ? null : raw.peso_kg,
-      descanso_segundos: raw.descanso_segundos === null ? null : raw.descanso_segundos,
-      observaciones: raw.observaciones.trim() || null,
+    const day = this.selectedDay();
+    const body = {
+      titulo: this.dayTitle().trim(),
+      musculos: this.dayMuscles(),
+      ejercicios: this.draftPayload(),
     };
-    this.exerciseSaving.set(true);
-    this.api.post<TrainingPlanExercise>('planes-entrenamiento-ejercicios/', payload).subscribe({
-      next: (row) => {
-        this.exerciseSaving.set(false);
-        this.planExercises.update((rows) => [...rows, row]);
-        this.exerciseForm.controls.ejercicio.setValue(0);
-        this.exerciseForm.controls.ejercicio.markAsUntouched();
-        this.exerciseForm.controls.observaciones.setValue('');
-        this.toast.success('Ejercicio agregado', row.ejercicio_detalle.nombre);
+    this.daySaving.set(true);
+    this.api.put<TrainingDaySaveResponse>(`planes-entrenamiento/${plan.id}/dias/${day}/`, body).subscribe({
+      next: (response) => {
+        this.daySaving.set(false);
+        this.plans.update((plans) => plans.map((item) => (item.id === response.plan.id ? response.plan : item)));
+        this.planExercises.update((rows) => [
+          ...rows.filter((row) => row.dia_semana !== day),
+          ...response.ejercicios,
+        ]);
+        this.dayEditorOpen.set(false);
+        const count = response.ejercicios.length;
+        this.toast.success(
+          'Plan guardado',
+          `${this.currentDay().label}: ${count} ${count === 1 ? 'ejercicio' : 'ejercicios'} · ${this.currentDay().sets} series`,
+        );
       },
       error: (error: unknown) => {
-        this.exerciseSaving.set(false);
+        this.daySaving.set(false);
+        this.rowErrors.set(this.rowErrorsFrom(error));
         const fields = erroresDelServidor(error);
-        this.exerciseError.set(
-          Object.values(fields).join(' ') || (error instanceof ApiError ? error.message : 'No se pudo agregar.'),
+        const general = ['titulo', 'musculos', 'rutina', 'entrenador', 'general']
+          .map((field) => fields[field])
+          .filter(Boolean)
+          .join(' ');
+        this.editorError.set(
+          general ||
+            (Object.keys(this.rowErrors()).length
+              ? 'Revisa los ejercicios marcados.'
+              : error instanceof ApiError
+                ? error.message
+                : 'No se pudo guardar el día.'),
         );
       },
     });
   }
 
-  protected async removeExercise(row: TrainingPlanExercise): Promise<void> {
-    const accepted = await this.confirm.confirm({
-      title: 'Quitar ejercicio',
-      message: `Se quitará ${row.ejercicio_detalle.nombre} del ${this.currentDay().label.toLowerCase()}.`,
-      confirmLabel: 'Quitar',
-    });
-    if (!accepted) return;
-    this.api.delete(`planes-entrenamiento-ejercicios/${row.id}/`).subscribe({
-      next: () => this.planExercises.update((rows) => rows.filter((item) => item.id !== row.id)),
-      error: (error: unknown) => {
-        this.toast.error('No se pudo quitar', error instanceof ApiError ? error.message : undefined);
-      },
-    });
+  /** Errores por fila: DRF los devuelve como lista o como objeto indexado. */
+  private rowErrorsFrom(error: unknown): Record<number, string> {
+    if (!(error instanceof ApiError) || !error.details || typeof error.details !== 'object') return {};
+    const rows = (error.details as Record<string, unknown>)['ejercicios'];
+    const result: Record<number, string> = {};
+    const text = (value: unknown): string =>
+      Array.isArray(value)
+        ? value.map(text).filter(Boolean).join(' ')
+        : value && typeof value === 'object'
+          ? Object.values(value as Record<string, unknown>).map(text).filter(Boolean).join(' ')
+          : typeof value === 'string'
+            ? value
+            : '';
+    if (rows && typeof rows === 'object') {
+      for (const [index, value] of Object.entries(rows as Record<string, unknown>)) {
+        const message = text(value);
+        if (message && /^[0-9]+$/.test(index)) result[Number(index)] = message;
+      }
+    }
+    return result;
+  }
+
+  protected exerciseSubtitle(exercise: Exercise): string {
+    if (exercise.grupo_muscular) return exercise.grupo_muscular;
+    return exercise.musculos?.length ? exercise.musculos.map(muscleLabel).join(' · ') : 'Sin músculos marcados';
   }
 
   protected toggleDayMuscle(code: string): void {

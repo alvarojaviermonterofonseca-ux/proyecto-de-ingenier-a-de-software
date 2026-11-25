@@ -37,7 +37,7 @@ npm run build      # required before Django can serve /app/
 Verification:
 
 ```powershell
-python backend\manage.py test gym          # 155 tests
+python backend\manage.py test gym          # 159 tests
 python backend\manage.py test gym.tests.GymApiTests.test_roles_iniciales_y_rutas_crud_requieren_autenticacion
 python backend\manage.py check
 python backend\manage.py makemigrations --check --dry-run
@@ -64,6 +64,7 @@ cd frontend; npm run build
 - Cross-table rules live in model `clean()` (assignment overlap, one open attendance per client, plans need an active assigned trainer, meals must use the client's own plan). API writes validate via `ModeloValidadoSerializer`; plain `save()` skips it unless `save(validar=True)`.
 - Permission changes are read from the DB on every request and do not revoke sessions; role changes revoke the target user's sessions except the caller's.
 - `POST /api/v1/asistencias/registrar-entrada|salida/` are self-service for the authenticated client: they bypass `asistencias:create`, use server time, set `metodo_entrada=manual` and return the open attendance instead of duplicating it.
+- `PUT /api/v1/planes-entrenamiento/{id}/dias/{dia}/` (`dia` in `PlanEntrenamiento.DIAS`) saves a whole training day in one transaction: optional `titulo`/`musculos` (kept if omitted) and `ejercicios` (max 30), which **replaces** that day's `PlanEntrenamientoEjercicio` rows with `orden` 1..n. Needs `planes-entrenamiento:edit` plus `planes-entrenamiento-ejercicios:edit` (the trainer role has no `:delete` on rows, so the SPA never deletes rows one by one); exercises must belong to the plan's gym. The SPA day editor (`training-plans.page.ts`) keeps a local draft and only calls this endpoint.
 - Errors always use `{"error": {"codigo", "mensaje", "detalles"}}`; unhandled `IntegrityError` becomes 409.
 - Food photos live under `PRIVATE_MEDIA_ROOT`, are never served from `/media/`, and are read through authenticated `GET /api/v1/registros-comida/{id}/foto/` (the SPA fetches a blob).
 - `GET /api/v1/conteos/` instantiates each menu ViewSet and counts `get_queryset()`, so badges always equal the matching list `count`.
