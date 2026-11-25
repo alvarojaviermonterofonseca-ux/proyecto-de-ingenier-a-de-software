@@ -88,7 +88,7 @@
               class="link-button link-button--danger"
               type="button"
               [disabled]="isProtected(role)"
-              [attr.title]="isProtected(role) ? 'Rol protegido por el sistema' : null"
+              [attr.title]="isProtected(role) ? 'Rol del sistema: lo comparten todos los gimnasios. Puedes cambiar sus permisos, no eliminarlo.' : null"
               (click)="remove(role)"
             >
               Eliminar rol
@@ -244,8 +244,8 @@
 <!-- Modal: Roles adicionales (Asignar a usuarios) -->
 <app-modal
   [open]="editor() === 'roles'"
-  title="Roles adicionales"
-  subtitle="Suman permisos al rol principal. El rol principal siempre queda asignado."
+  title="Roles y rol principal"
+  subtitle="El rol principal define el perfil y los accesos base; los roles adicionales suman permisos."
   (closed)="closeEditor()"
 >
   @if (formError()) {
@@ -266,28 +266,54 @@
       <option value="" disabled [selected]="!selectedUser()">Elige un usuario del sistema…</option>
       @for (u of users(); track u.id) {
         <option [value]="u.id">
-          {{ u.nombre }} ({{ u.correo }}) — Rol principal: {{ roleLabel(u.rol_detalle.nombre) }}
+          {{ u.nombre }} ({{ u.correo }}) — Rol principal: {{ roleLabel(u.rol_nombre) }}
         </option>
       }
     </select>
   </div>
 
   @if (selectedUser(); as user) {
+    <div class="field" style="margin-bottom: 1.25rem;">
+      <label for="assign-primary-role" style="display: block; margin-bottom: 0.4rem; font-weight: 500;">
+        Rol principal
+      </label>
+      <select
+        id="assign-primary-role"
+        class="field-input"
+        style="width: 100%; padding: 0.6rem 0.75rem;"
+        [value]="primaryRoleId() ?? user.rol"
+        [disabled]="!auth.isAdmin()"
+        (change)="changePrimaryRole($any($event.target).value)"
+      >
+        @for (role of activeRoles(); track role.id) {
+          <option [value]="role.id">{{ roleLabel(role.nombre) }}</option>
+        }
+      </select>
+      @if (auth.isAdmin()) {
+        <p class="field-help">
+          Cambiar el rol principal reemplaza el perfil anterior. Si ese perfil tiene
+          datos asociados, primero reasígnalos o elimínalos.
+        </p>
+      } @else {
+        <p class="field-help">Solo un administrador puede cambiar el rol principal.</p>
+      }
+    </div>
+
     <ul class="role-checklist">
       @for (role of activeRoles(); track role.id) {
         <li>
-          <label [class.is-locked]="role.id === user.rol">
+          <label [class.is-locked]="role.id === primaryRoleId()">
             <input
               type="checkbox"
-              [checked]="role.id === user.rol || isRoleDraftSelected(role.id)"
-              [disabled]="role.id === user.rol"
+              [checked]="isRoleDraftSelected(role.id) || role.id === primaryRoleId()"
+              [disabled]="role.id === primaryRoleId()"
               (change)="toggleRoleDraft(role.id, $any($event.target).checked)"
             />
             <span class="role-info">
               <strong>{{ roleLabel(role.nombre) }}</strong>
               <small>{{ role.descripcion || 'Sin descripción' }} · {{ role.permisos.length }} permisos</small>
             </span>
-            @if (role.id === user.rol) {
+            @if (role.id === primaryRoleId()) {
               <span class="tag tag--muted">Principal</span>
             }
           </label>

@@ -55,9 +55,12 @@ export class SecurityPermissionsPage implements OnInit {
   protected readonly editor = signal<'create' | 'edit' | null>(null);
   protected readonly editing = signal<Permission | null>(null);
 
-  protected readonly canCreate = computed(() => this.auth.hasPermission('permisos:create'));
-  protected readonly canEdit = computed(() => this.auth.hasPermission('permisos:edit'));
-  protected readonly canDelete = computed(() => this.auth.hasPermission('permisos:delete'));
+  // El catálogo es común a todos los gimnasios y solo lo modifica el personal
+  // de la plataforma (el servidor responde 403 a cualquier otro). Desde un
+  // gimnasio se consulta y se asigna a los roles en "Roles y permisos".
+  protected readonly canCreate = computed(() => false);
+  protected readonly canEdit = computed(() => false);
+  protected readonly canDelete = computed(() => false);
 
   protected readonly form = this.formBuilder.nonNullable.group({
     recurso: ['', [Validators.required, Validators.pattern(/^[a-z0-9-]+$/)]],

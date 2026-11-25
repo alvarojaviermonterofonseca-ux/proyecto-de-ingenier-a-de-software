@@ -79,6 +79,24 @@
   --gc-transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Alias que usa el módulo financiero (--color-*). Apuntan a los tokens
+   --gc-* para que ese módulo comparta tema claro y oscuro con el resto. */
+:root {
+  --color-bg: var(--gc-bg);
+  --color-surface: var(--gc-surface);
+  --color-border: var(--gc-border);
+  --color-border-strong: var(--gc-border-strong);
+  --color-text: var(--gc-ink);
+  --color-text-muted: var(--gc-muted);
+  --color-primary: var(--gc-primary);
+  --color-primary-light: var(--gc-primary-soft);
+  --color-primary-focus: var(--gc-primary-soft);
+  --color-success: var(--gc-success);
+  --color-warning: var(--gc-warning);
+  --color-danger: var(--gc-danger);
+  --color-info: var(--gc-info);
+}
+
 /* Modo oscuro - profundidad real, no solo inversión */
 html[data-theme='dark'] {
   --gc-bg: #0a0f14;
@@ -1775,3 +1793,9 @@ html[data-theme='dark'] .notice--info { border-left-color: var(--gc-info); }
 .tooltip::before { content: attr(data-tooltip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); padding: var(--gc-spacing-1) var(--gc-spacing-2); background: var(--gc-ink); color: var(--gc-bg); font-size: 0.6875rem; font-weight: 500; border-radius: var(--gc-radius-sm); white-space: nowrap; opacity: 0; visibility: hidden; transition: all var(--gc-transition-fast); z-index: 200; pointer-events: none; }
 .tooltip::after { content: ''; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--gc-ink); opacity: 0; visibility: hidden; transition: all var(--gc-transition-fast); }
 .tooltip:hover::before, .tooltip:hover::after { opacity: 1; visibility: visible; }
+/* Campo con error: el mensaje va encima del control y el borde se marca. */
+.field.has-error input,
+.field.has-error select,
+.field.has-error textarea { border-color: var(--gc-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gc-danger) 14%, transparent); }
+.field.has-error label { color: var(--gc-danger); }
+.field-hint { margin: 0; font-size: 0.72rem; color: var(--gc-muted); line-height: 1.4; }

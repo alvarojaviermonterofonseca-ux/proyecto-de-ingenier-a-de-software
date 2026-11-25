@@ -40,4 +40,13 @@ export class ToastService {
     this._toasts.update((toasts) => [...toasts, toast]);
     window.setTimeout(() => this.dismiss(toast.id), 5200);
   }
+
+  /**
+   * Remove all toasts instantly. Useful when we want to clear lingering messages
+   * (e.g., the welcome toast after a role/permission change).
+   */
+  clearAll(): void {
+    this._toasts.set([]);
+    this.sequence = 0;
+  }
 }

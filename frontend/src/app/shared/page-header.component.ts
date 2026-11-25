@@ -1,8 +1,18 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 
+import { IconComponent } from './icon.component';
+
+export interface PageHeaderAction {
+  label: string;
+  icon: string;
+  action: () => void;
+  class?: 'button--primary' | 'button--secondary' | 'button--outline';
+}
+
 @Component({
   selector: 'app-page-header',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="page-header">
@@ -16,6 +26,18 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
         }
       </div>
       <div class="page-header__actions">
+        @for (action of actions(); track action.label) {
+          <button
+            type="button"
+            class="button"
+            [class]="action.class || 'button--primary'"
+            (click)="action.action()"
+          >
+            <app-icon [name]="action.icon" [size]="16" />
+            {{ action.label }}
+          </button>
+        }
+        <!-- Botones que cada página proyecta (Nuevo cliente, Nuevo usuario...). -->
         <ng-content />
       </div>
     </header>
@@ -69,4 +91,5 @@ export class PageHeaderComponent {
   readonly eyebrow = input('');
   readonly title = input.required<string>();
   readonly subtitle = input('');
+  readonly actions = input<PageHeaderAction[]>([]);
 }

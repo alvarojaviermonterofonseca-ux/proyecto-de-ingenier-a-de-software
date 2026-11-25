@@ -11,8 +11,8 @@
     <a class="brand" routerLink="/inicio" (click)="closeSidebar()">
       <span class="brand__mark"><app-icon name="dumbbell" [size]="24" /></span>
       <span>
-        <strong>Gym Control</strong>
-        <small>Pro</small>
+        <strong>Gym Control Pro</strong>
+        <small [attr.title]="auth.user()?.gimnasio?.nombre ?? null">{{ auth.user()?.gimnasio?.nombre ?? 'Plataforma' }}</small>
       </span>
     </a>
 

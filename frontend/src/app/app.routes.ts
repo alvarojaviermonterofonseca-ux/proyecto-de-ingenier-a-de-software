@@ -22,6 +22,15 @@ export const routes: Routes = [
           import('./features/dashboard/dashboard.page').then((m) => m.DashboardPage),
       },
       {
+        path: 'dashboard',
+        canActivate: [permissionGuard],
+        data: { title: 'Dashboard Financiero', permission: 'pagos:view', adminOnly: true },
+        loadComponent: () =>
+          import('./features/financial/dashboard/financial-dashboard.page').then(
+            (m) => m.FinancialDashboardPage,
+          ),
+      },
+      {
         path: 'usuarios',
         pathMatch: 'full',
         redirectTo: 'autorizados/usuarios',
@@ -48,6 +57,17 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./features/authorized/users/authorized-users.page').then(
                 (m) => m.AuthorizedUsersPage,
+              ),
+          },
+          {
+            path: 'seguridad/recursos',
+            data: {
+              title: 'Nombres de recursos',
+              permission: 'permisos:view',
+            },
+            loadComponent: () =>
+              import('./features/authorized/security/security-recursos.page').then(
+                (m) => m.SecurityRecursosPage,
               ),
           },
           {
@@ -81,6 +101,17 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./features/authorized/security/security-assignments.page').then(
                 (m) => m.SecurityAssignmentsPage,
+              ),
+          },
+          {
+            path: 'seguridad/recursos',
+            data: {
+              title: 'Nombres de recursos',
+              permission: 'permisos:view',
+            },
+            loadComponent: () =>
+              import('./features/authorized/security/security-recursos.page').then(
+                (m) => m.SecurityRecursosPage,
               ),
           },
         ],
@@ -187,6 +218,58 @@ export const routes: Routes = [
         data: { title: 'Notificaciones', permission: 'notificaciones:view' },
         loadComponent: () =>
           import('./features/notifications/notifications.page').then((m) => m.NotificationsPage),
+      },
+      {
+        path: 'financiero',
+        canActivate: [permissionGuard],
+        data: {
+          title: 'Financiero',
+          permission: ['pagos:view', 'gastos:view', 'membresias:view', 'alertas:view'],
+        },
+        loadComponent: () =>
+          import('./features/financial/financial.layout').then((m) => m.FinancialLayout),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'ingresos' },
+          {
+            path: 'ingresos',
+            data: { title: 'Ingresos', permission: 'pagos:view' },
+            loadComponent: () =>
+              import('./features/financial/ingresos/ingresos.page').then((m) => m.IngresosPage),
+          },
+          {
+            path: 'gastos',
+            data: { title: 'Gastos', permission: 'gastos:view' },
+            loadComponent: () =>
+              import('./features/financial/gastos/gastos.page').then((m) => m.GastosPage),
+          },
+          {
+            path: 'membresias',
+            data: { title: 'Membresías', permission: 'membresias:view' },
+            loadComponent: () =>
+              import('./features/financial/membresias/membresias.page').then((m) => m.MembresiasPage),
+          },
+          {
+            path: 'alertas',
+            data: { title: 'Alertas', permission: 'alertas:view' },
+            loadComponent: () =>
+              import('./features/financial/alertas/alertas.page').then((m) => m.AlertasPage),
+          },
+          {
+            path: 'reportes',
+            data: { title: 'Reportes', permission: 'pagos:export' },
+            loadComponent: () =>
+              import('./features/financial/reportes/reportes.page').then((m) => m.ReportesPage),
+          },
+          {
+            path: 'configuracion',
+            canActivate: [permissionGuard],
+            data: { title: 'Configuración', adminOnly: true },
+            loadComponent: () =>
+              import('./features/financial/configuracion/configuracion.page').then(
+                (m) => m.ConfiguracionPage,
+              ),
+          },
+        ],
       },
       {
         path: 'perfil',

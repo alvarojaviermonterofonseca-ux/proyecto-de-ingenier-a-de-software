@@ -6,6 +6,10 @@ export interface NavItem {
   permissionMode?: 'any' | 'all';
   adminOnly?: boolean;
   exact?: boolean;
+  /** Código del recurso del sistema (ej. 'clientes') para resolver su alias de nombre. */
+  recurso?: string;
+  /** Ruta original del recurso cuando se navega usando el alias. */
+  rutaOriginal?: string;
   /**
    * Recursos cuyo total se muestra como distintivo. Con varios recursos
    * (por ejemplo Equipo) el distintivo suma sus conteos.
@@ -24,6 +28,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [{ label: 'Inicio', route: '/inicio', icon: 'home', exact: true }],
   },
   {
+    label: 'Dashboard',
+    items: [
+      {
+        label: 'Dashboard Financiero',
+        route: '/dashboard',
+        icon: 'chart',
+        permission: 'pagos:view',
+        adminOnly: true,
+      },
+    ],
+  },
+  {
     label: 'Autorizados',
     items: [
       {
@@ -32,6 +48,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'users',
         permission: 'usuarios:view',
         counts: ['usuarios'],
+        recurso: 'usuarios',
+        rutaOriginal: '/autorizados/usuarios',
       },
       {
         label: 'Roles y permisos',
@@ -39,6 +57,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'shield',
         permission: 'roles:view',
         counts: ['roles'],
+        recurso: 'roles',
+        rutaOriginal: '/autorizados/seguridad/roles',
       },
       {
         label: 'Catálogo de permisos',
@@ -46,6 +66,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'lock',
         permission: 'permisos:view',
         counts: ['permisos'],
+        recurso: 'permisos',
+        rutaOriginal: '/autorizados/seguridad/permisos',
       },
       {
         label: 'Asignaciones de rol',
@@ -53,6 +75,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'target',
         permission: 'usuarios:view',
         counts: ['usuarios-roles'],
+        recurso: 'usuarios-roles',
+        rutaOriginal: '/autorizados/seguridad/asignaciones',
       },
       {
         label: 'Auditoría',
@@ -60,6 +84,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'audit',
         adminOnly: true,
         counts: ['auditoria'],
+        recurso: 'auditoria',
+        rutaOriginal: '/auditoria',
+      },
+      {
+        label: 'Nombres de recursos',
+        route: '/autorizados/seguridad/recursos',
+        icon: 'tag',
+        permission: 'permisos:view',
+        adminOnly: true,
       },
     ],
   },
@@ -72,6 +105,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'dumbbell',
         permission: 'ejercicios:view',
         counts: ['ejercicios'],
+        recurso: 'ejercicios',
+        rutaOriginal: '/ejercicios',
       },
       {
         label: 'Planes de entrenamiento',
@@ -79,6 +114,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'clipboard',
         permission: 'planes-entrenamiento:view',
         counts: ['planes-entrenamiento'],
+        recurso: 'planes-entrenamiento',
+        rutaOriginal: '/planes-entrenamiento',
       },
       {
         label: 'Planes de alimentación',
@@ -86,6 +123,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'salad',
         permission: 'planes-alimentacion:view',
         counts: ['planes-alimentacion'],
+        recurso: 'planes-alimentacion',
+        rutaOriginal: '/planes-alimentacion',
       },
       {
         label: 'Comidas',
@@ -93,6 +132,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'apple',
         permission: 'comidas:view',
         counts: ['comidas'],
+        recurso: 'comidas',
+        rutaOriginal: '/comidas',
       },
     ],
   },
@@ -105,6 +146,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'user',
         permission: 'clientes:view',
         counts: ['clientes'],
+        recurso: 'clientes',
+        rutaOriginal: '/clientes',
       },
       {
         label: 'Equipo',
@@ -131,6 +174,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'clock',
         permission: 'asistencias:view',
         counts: ['asistencias'],
+        recurso: 'asistencias',
+        rutaOriginal: '/asistencias',
       },
       {
         label: 'Entrenamientos',
@@ -138,6 +183,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'calendar',
         permission: 'entrenamientos:view',
         counts: ['entrenamientos'],
+        recurso: 'entrenamientos',
+        rutaOriginal: '/entrenamientos',
       },
       {
         label: 'Registros de comida',
@@ -145,6 +192,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'camera',
         permission: 'registros-comida:view',
         counts: ['registros-comida'],
+        recurso: 'registros-comida',
+        rutaOriginal: '/registros-comida',
       },
       {
         label: 'Notificaciones',
@@ -152,6 +201,66 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: 'bell',
         permission: 'notificaciones:view',
         counts: ['notificaciones'],
+        recurso: 'notificaciones',
+        rutaOriginal: '/notificaciones',
+      },
+    ],
+  },
+  {
+    label: 'Financiero',
+    items: [
+      {
+        label: 'Ingresos',
+        route: '/financiero/ingresos',
+        icon: 'dollar-sign',
+        permission: 'pagos:view',
+        adminOnly: true,
+        counts: ['pagos'],
+        recurso: 'pagos',
+        rutaOriginal: '/financiero/ingresos',
+      },
+      {
+        label: 'Gastos',
+        route: '/financiero/gastos',
+        icon: 'credit-card',
+        permission: 'gastos:view',
+        adminOnly: true,
+        counts: ['gastos'],
+        recurso: 'gastos',
+        rutaOriginal: '/financiero/gastos',
+      },
+      {
+        label: 'Membresías',
+        route: '/financiero/membresias',
+        icon: 'id-card',
+        permission: 'membresias:view',
+        adminOnly: true,
+        counts: ['membresias'],
+        recurso: 'membresias',
+        rutaOriginal: '/financiero/membresias',
+      },
+      {
+        label: 'Alertas',
+        route: '/financiero/alertas',
+        icon: 'alert-triangle',
+        permission: 'alertas:view',
+        adminOnly: true,
+        counts: ['alertas'],
+        recurso: 'alertas',
+        rutaOriginal: '/financiero/alertas',
+      },
+      {
+        label: 'Reportes',
+        route: '/financiero/reportes',
+        icon: 'file-text',
+        permission: 'pagos:export',
+        adminOnly: true,
+      },
+      {
+        label: 'Configuración',
+        route: '/financiero/configuracion',
+        icon: 'settings',
+        adminOnly: true,
       },
     ],
   },

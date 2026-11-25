@@ -88,3 +88,19 @@
     width: 100%;
   }
 }
+
+.exercise-card__tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.tag--muscle { background: rgba(163, 230, 53, 0.14); color: #4d7c0f; }
+:host-context(html[data-theme='dark']) .tag--muscle { color: #bef264; }
+.image-drop {
+  display: flex; align-items: center; gap: 1rem; padding: 0.85rem;
+  border: 1.5px dashed var(--gc-border); border-radius: 1rem; background: var(--gc-surface-muted, transparent);
+}
+.image-drop__preview, .image-drop__empty {
+  width: 96px; height: 96px; border-radius: 0.9rem; object-fit: cover; flex-shrink: 0;
+}
+.image-drop__empty { display: flex; align-items: center; justify-content: center; background: #1f2937; color: #94a3b8; }
+.image-drop__text { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+.image-drop__text span { color: var(--gc-muted); font-size: 0.78rem; }
+.image-drop__actions { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -1,0 +1,129 @@
+<app-page-header
+  title="Nombres de recursos"
+  subtitle="Edita el nombre de visualización de cada recurso del sistema. Los cambios se guardan solo en tu sesión del navegador (no se modifica la base de datos)."
+/>
+
+<div class="toolbar">
+  <input
+    type="search"
+    placeholder="Buscar recurso o nombre..."
+    [(ngModel)]="query"
+    (input)="updateQuery($any($event.target).value)"
+    class="search-input"
+  />
+  @if (canEdit()) {
+    <button
+      class="btn btn-outline"
+      [disabled]="loading()"
+      title="Recargar desde la API"
+      (click)="load()"
+    >
+      <app-icon name="refresh"></app-icon>
+      Recargar
+    </button>
+  }
+</div>
+
+@if (error()) {
+  <div class="alert alert-error">{{ error() }}</div>
+}
+
+@if (loading()) {
+  <div class="loader">Cargando recursos…</div>
+} @else if (visible().length === 0) {
+  <app-empty-state
+    title="No hay recursos"
+    message="No se encontraron recursos para editar."
+  ></app-empty-state>
+} @else {
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Recurso (código)</th>
+        <th>Nombre de visualización</th>
+        <th>Ruta</th>
+        <th class="actions">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (r of visible(); track r.recurso) {
+        <tr>
+          <td>
+            <code>{{ r.recurso }}</code>
+          </td>
+          <td>
+            @if (canEdit()) {
+              <div class="alias-editor">
+                <input
+                  type="text"
+                  [(ngModel)]="r.alias"
+                  [placeholder]="r.recurso"
+                  class="alias-input"
+                  (blur)="guardarAliasRecurso(r.recurso)"
+                  (keydown.enter)="guardarAliasRecurso(r.recurso)"
+                  (keydown.escape)="cancelarEdicion(r.recurso)"
+                />
+                <button
+                  class="btn btn-sm btn-success"
+                  [disabled]="!r.alias.trim() || form.invalid || saving()"
+                  (click)="guardarAliasRecurso(r.recurso)"
+                  title="Guardar alias"
+                >
+                  <app-icon name="save"></app-icon>
+                </button>
+                <button
+                  class="btn btn-sm btn-danger"
+                  [disabled]="!r.alias.trim() || saving()"
+                  (click)="eliminarAlias(r.recurso)"
+                  title="Eliminar alias"
+                >
+                  <app-icon name="delete"></app-icon>
+                </button>
+              </div>
+            } @else {
+              <span class="alias-readonly">{{ r.alias || r.recurso }}</span>
+            }
+          </td>
+          <td>
+            <span class="route-badge">{{ rutaPara(r.recurso) }}</span>
+          </td>
+          <td class="actions">
+            <button
+              class="btn btn-sm btn-primary"
+              [disabled]="!esEditable(r.recurso)"
+              (click)="navegarRecurso(r.recurso)"
+              title="Ir a {{ r.recurso }}"
+            >
+              <app-icon name="external-link"></app-icon>
+              Ver
+            </button>
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+
+  <div class="hint">
+    @if (canEdit()) {
+      <p>
+        Escribe un nombre personalizado en la columna
+        <strong>Nombre de visualización</strong> y presiona
+        <kbd>Enter</kbd> o haz clic en
+        <app-icon name="save" style="vertical-align: middle;"></app-icon>
+        para guardarlo. El alias se conserva solo en tu sesión actual del
+        navegador.
+      </p>
+      <p>
+        Al hacer clic en <strong>Ver</strong>, se abre la página del recurso
+        usando su ruta original del sistema. El nombre de visualización es solo
+        para mostrar; no cambia la navegación interna ni los datos del
+        servidor.
+      </p>
+    } @else {
+      <p>
+        No tienes permiso para editar nombres de recursos. Solo puedes ver la
+        lista y navegar a cada sección.
+      </p>
+    }
+  </div>
+}

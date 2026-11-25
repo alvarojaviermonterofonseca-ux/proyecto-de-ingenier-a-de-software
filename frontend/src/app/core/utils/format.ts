@@ -176,7 +176,48 @@ function dateOnly(value: string): Date | null {
   return new Date(year, month - 1, day);
 }
 
-function localDateString(date: Date): string {
+export function localDateString(date: Date): string {
   const pad = (part: number) => String(part).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function formatCurrency(value: number | string): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return '$ 0';
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(num);
+}
+
+export function formatNumber(value: number | string): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return '0';
+  return new Intl.NumberFormat('es-CO').format(num);
+}
+
+export type PeriodoRapido = 'dia' | 'semana' | 'mes' | 'anio';
+
+export const PERIODOS_RAPIDOS: { valor: PeriodoRapido; etiqueta: string }[] = [
+  { valor: 'dia', etiqueta: 'Hoy' },
+  { valor: 'semana', etiqueta: 'Esta semana' },
+  { valor: 'mes', etiqueta: 'Este mes' },
+  { valor: 'anio', etiqueta: 'Este año' },
+];
+
+/** Rango (yyyy-mm-dd) del período en curso; la semana inicia el lunes. */
+export function rangoPeriodo(periodo: PeriodoRapido, base: Date = new Date()): { desde: string; hasta: string } {
+  const hoy = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  let desde = hoy;
+  if (periodo === 'semana') {
+    const diaSemana = (hoy.getDay() + 6) % 7;
+    desde = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - diaSemana);
+  } else if (periodo === 'mes') {
+    desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  } else if (periodo === 'anio') {
+    desde = new Date(hoy.getFullYear(), 0, 1);
+  }
+  return { desde: localDateString(desde), hasta: localDateString(hoy) };
 }
