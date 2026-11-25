@@ -1,8 +1,10 @@
 """Carga datos de demostración completos para Gym Control Pro."""
 
+import secrets
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -36,6 +38,9 @@ class Command(BaseCommand):
     help = "Crea usuarios y datos de demostración completos en todas las tablas operativas."
 
     prefijo_correo = "demo.usuario"
+    # Solo se usa con DJANGO_DEBUG=true. Fuera de desarrollo, si no se pasa
+    # --contrasena, se genera una aleatoria para no dejar cuentas (incluidos
+    # administradores) con una contraseña publicada en el README.
     contrasena_predeterminada = "DemoGym2026!"
 
     def add_arguments(self, parser):
@@ -47,8 +52,11 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--contrasena",
-            default=self.contrasena_predeterminada,
-            help="Contraseña común para las cuentas demo.",
+            help=(
+                "Contraseña común para las cuentas demo. Por defecto "
+                f"'{self.contrasena_predeterminada}' con DJANGO_DEBUG=true y una "
+                "aleatoria en cualquier otro caso."
+            ),
         )
         parser.add_argument(
             "--por-rol",
@@ -78,6 +86,12 @@ class Command(BaseCommand):
             raise CommandError("La cantidad debe ser al menos 5 para incluir los cinco roles.")
         if cantidad_por_rol is not None and cantidad_por_rol < 1:
             raise CommandError("La cantidad por rol debe ser al menos 1.")
+        if options.get("contrasena") is None:
+            options["contrasena"] = (
+                self.contrasena_predeterminada
+                if settings.DEBUG
+                else secrets.token_urlsafe(12)
+            )
         if len(options["contrasena"]) < 8:
             raise CommandError("La contraseña debe tener al menos 8 caracteres.")
 
