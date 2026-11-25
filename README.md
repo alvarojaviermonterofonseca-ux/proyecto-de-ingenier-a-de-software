@@ -73,7 +73,7 @@ El panel Django anterior sigue disponible en `http://127.0.0.1:8000/panel/`. Ini
 
 El RBAC es real y persistente en la base de datos: `UsuarioRol` permite varios roles por usuario con `activo` y `asignado_por`; `Recurso` es el catálogo normalizado de módulos; y `RolRecurso` (`rol_has_recurso`) materializa la relación N:M del diagrama entre roles y recursos. `Permiso` guarda las operaciones atómicas `recurso:accion` y `RolPermiso` las asigna al rol. Una solicitud se autoriza únicamente cuando el rol tiene tanto el recurso como la acción concedida; así, dar acceso a un módulo no convierte automáticamente una lectura en permisos de edición o borrado. `Usuario.rol` se conserva como rol principal para login y perfiles, mientras que `Usuario.roles` agrega roles adicionales M:N. Los roles personalizados están permitidos (el nombre ya no usa `choices`); solo los roles base `cliente`, `entrenador`, `terapeuta`, `recepcionista` y `administrador` tienen perfil asociado.
 
-El panel consume `/api/v1/roles/` (cada rol incluye sus códigos de permiso), `/api/v1/me/` (roles y permisos efectivos) y las acciones `PUT /api/v1/roles/{id}/permisos/` y `PATCH /api/v1/usuarios/{id}/roles/`; ya no usa `localStorage`. Cada `ViewSet` declara su recurso y el servidor valida `recurso:accion` según el método HTTP en `backend/gym/permissions.py`, por lo que ocultar un botón no sustituye la autorización del backend.
+El panel consume `/api/v1/roles/` (cada rol incluye sus códigos de permiso), `/api/v1/me/` (roles y permisos efectivos) y las acciones `PUT /api/v1/roles/{id}/permisos/` y `PATCH /api/v1/usuarios/{id}/roles/`; esta última acepta `rol_principal` para cambiar el rol principal junto con los adicionales (solo administradores). Ya no usa `localStorage`. Cada `ViewSet` declara su recurso y el servidor valida `recurso:accion` según el método HTTP en `backend/gym/permissions.py`, por lo que ocultar un botón no sustituye la autorización del backend.
 
 El RBAC por recurso se complementa con alcance por rol y propiedad, de modo que un permiso concedido no permite consultar datos ajenos por cambiar el identificador de la URL:
 
@@ -113,7 +113,7 @@ La respuesta contiene `token`, `tipo_token` (`Bearer`) y `expira_at`. Incluya el
 Authorization: Bearer <token>
 ```
 
-Todos los recursos CRUD y `GET /api/v1/me/` requieren una sesión válida. La sesión dura 8 horas por defecto; puede cambiarla con `AUTH_TOKEN_TTL_HOURS`. Para cerrar sesión y revocar el token actual use `POST /api/v1/logout/`; para revocar todas las sesiones de la cuenta use `POST /api/v1/logout/all/`. El login está limitado por IP (`LOGIN_THROTTLE_RATE`, por defecto `10/min`) y responde `429` al superar el límite.
+Todos los recursos CRUD y `GET /api/v1/me/` requieren una sesión válida. La sesión dura 8 horas por defecto; puede cambiarla con `AUTH_TOKEN_TTL_HOURS`. Para cerrar sesión y revocar el token actual use `POST /api/v1/logout/`; para revocar todas las sesiones de la cuenta use `POST /api/v1/logout/all/`. El registro público de clientes está en `POST /api/v1/registro/` (público, crea la cuenta con rol `cliente` y devuelve una sesión igual que el login). Tanto el login como el registro están limitados por IP (`LOGIN_THROTTLE_RATE` y `REGISTRO_THROTTLE_RATE`) y responden `429` al superar el límite.
 
 ## Endpoints
 
@@ -137,7 +137,7 @@ La cascada se ejecuta en una transacción y es idempotente:
 - Al borrar un `Rol` se desactivan sus asignaciones de usuario; al borrar un `Permiso` deja de concederse aunque siga referenciado por un rol.
 - Al borrar un `PlanEntrenamiento` se eliminan físicamente sus filas de ejercicios. Al borrar un `PlanAlimentacion` se desactivan sus comidas; los registros de comida se conservan como historial.
 
-- `POST /api/v1/login/` (público), `POST /api/v1/logout/` y `GET /api/v1/me/`
+- `POST /api/v1/login/` (público), `POST /api/v1/registro/` (público), `POST /api/v1/logout/` y `GET /api/v1/me/`
 - `GET /api/v1/resumen/` (indicadores del panel, incluido `visitas_semana` y `asistencia_abierta` del cliente) y `GET /api/v1/conteos/` (total por recurso para los distintivos del menú, calculado con el mismo alcance y borrado lógico que cada listado)
 
 - `/api/v1/roles/`, `/api/v1/permisos/`, `/api/v1/roles-permisos/`, `/api/v1/usuarios/`, `/api/v1/usuarios-roles/`
@@ -207,6 +207,19 @@ $env:DB_HOST = "127.0.0.1"
 python backend\manage.py migrate
 ```
 
-Otras variables útiles: `API_PAGE_SIZE` (tamaño de página, por defecto `25`), `LOGIN_THROTTLE_RATE` (por defecto `10/min`), `AUTH_TOKEN_TTL_HOURS`, `PRIVATE_MEDIA_ROOT`, `FOTO_REGISTRO_MAX_BYTES` y `FOTO_REGISTRO_MAX_DIMENSION`.
+Otras variables útiles: `API_PAGE_SIZE` (tamaño de página, por defecto `25`), `LOGIN_THROTTLE_RATE` (por defecto `10/min`), `REGISTRO_THROTTLE_RATE` (por defecto `20/hour`), `AUTH_TOKEN_TTL_HOURS`, `PRIVATE_MEDIA_ROOT`, `FOTO_REGISTRO_MAX_BYTES` y `FOTO_REGISTRO_MAX_DIMENSION`.
 
 CORS está abierto mientras `DJANGO_DEBUG=true`, pensado para el frontend local. En producción use `DJANGO_DEBUG=false`, una `DJANGO_SECRET_KEY` segura, `DJANGO_ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` (orígenes separados por comas).
+
+## Modelo anatómico 3D (planes de entrenamiento)
+
+El visor de músculos (`frontend/src/app/shared/body-3d.component.ts`, Three.js) carga
+`frontend/public/models/anatomia-muscular.glb`, un modelo anatómico real derivado de
+**BodyParts3D, © 2008 Life Science Integrated Database Center (DBCLS)**, con licencia
+**CC BY-SA 2.1 Japón**. El crédito se muestra bajo el visor y el detalle de la licencia
+y de los cambios está en `frontend/public/models/LICENCIA-MODELO-ANATOMICO.txt`.
+El modelo (no el código de la app) debe seguir compartiéndose con esa misma licencia.
+
+Cada músculo seleccionable es una malla `M_<codigo>_<R|L|C>`; los códigos coinciden con
+`MUSCULOS_DETALLADOS` (backend) y `MUSCLES` (frontend). Los grupos antiguos (`pecho`,
+`cuadriceps`…) siguen siendo válidos. Para regenerar el GLB ver `tools/modelo-anatomico/`.
