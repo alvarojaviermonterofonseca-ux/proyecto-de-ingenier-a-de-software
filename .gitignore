@@ -18,6 +18,11 @@ __pycache__/
 staticfiles/
 media/
 
+# Datos que la aplicación genera en tiempo de ejecución
+# (nombres de recursos guardados con PUT /api/v1/resource-aliases/)
+
+backend/resource_aliases.json
+
 # Variables de entorno y credenciales
 
 .env
