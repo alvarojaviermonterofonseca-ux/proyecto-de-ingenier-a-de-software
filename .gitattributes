@@ -1,0 +1,16 @@
+# Normaliza los fines de línea: el repositorio guarda LF y Git deja de avisar
+# "LF will be replaced by CRLF" en cada archivo de texto.
+* text=auto eol=lf
+
+# Scripts de Windows con su fin de línea nativo.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binarios: sin conversión ni diff de texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.glb binary
+*.sqlite3 binary

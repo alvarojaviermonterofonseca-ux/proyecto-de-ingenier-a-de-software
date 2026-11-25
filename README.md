@@ -1,10 +1,29 @@
-# Gym Control Pro API
+# Gym Control Pro
 
-Backend REST construido con Django y Django REST Framework a partir de `gym_control_pro.sql`. Incluye identidad y perfiles, asignaciones cliente-entrenador y cliente-terapeuta, asistencia, entrenamiento, nutrición y notificaciones.
+![CI](https://github.com/alvarojaviermonterofonseca-ux/proyecto-de-ingenier-a-de-software/actions/workflows/ci.yml/badge.svg)
+
+**Versión actual: 1.1.0** · [Registro de cambios](CHANGELOG.md) · [Cómo contribuir](CONTRIBUTING.md)
+
+Sistema de gestión para gimnasios. Administra clientes, entrenadores, terapeutas y recepcionistas; asignaciones, asistencia, planes de entrenamiento (con modelo anatómico 3D) y de alimentación; un módulo financiero con pagos, gastos, membresías, alertas, dashboard y reportes; control de acceso por roles y permisos (RBAC) y aislamiento de datos por gimnasio.
+
+## Tecnologías
+
+| Capa | Tecnología |
+|---|---|
+| Backend | Python 3.12+, Django 6.1, Django REST Framework 3.18, drf-spectacular (OpenAPI) |
+| Seguridad | Tokens Bearer propios (solo se guarda su hash), contraseñas Argon2id, RBAC por recurso (125 permisos) |
+| Base de datos | SQLite (desarrollo) o MySQL mediante PyMySQL |
+| Reportes | openpyxl (xlsx) y reportlab (pdf) |
+| Frontend | Angular 19 (componentes standalone), TypeScript 5.7, three.js |
+| Integración continua | GitHub Actions (`.github/workflows/ci.yml`) |
+
+## Requisitos
+
+- Python 3.12 o posterior.
+- Node.js 20 o posterior y npm (para compilar la SPA).
+- Opcional: MySQL 8 si no se usa SQLite.
 
 ## Instalación y arranque
-
-Requiere Python 3.12 o posterior.
 
 El código Django está en `backend/`, la SPA Angular y el panel legado en `frontend/`, el entorno virtual en `venv/` y las bases SQLite en `base de datos/`.
 
@@ -14,15 +33,21 @@ Usa un único entorno virtual, `venv/`, en la raíz del repositorio. Está exclu
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
+Copy-Item backend\.env.example backend\.env   # edita DB_NAME con la ruta de tu base SQLite
 python backend\manage.py migrate
 python backend\manage.py crear_administrador_gym --nombre "Administrador" --correo admin@example.com
 python backend\manage.py sembrar_datos_demo --cantidad 100
+cd frontend; npm install; npm run build; cd ..
 python backend\manage.py runserver
 ```
 
+Con el servidor en marcha, la SPA está en `http://127.0.0.1:8000/app/`, la API en `/api/v1/`, su documentación en `/api/v1/docs/` y el administrador de Django en `/admin/`. Para desarrollar el frontend con recarga automática usa `cd frontend; npm start` (`http://localhost:4200`).
+
+Pruebas: `python backend\manage.py test gym`. Antes de abrir un Pull Request revisa [CONTRIBUTING.md](CONTRIBUTING.md).
+
 El comando de administrador solicita la contraseña de forma oculta y crea la primera cuenta con acceso a la API.
 
-`sembrar_datos_demo` crea 100 cuentas de demostración, 20 por cada rol, con todos los campos de sus perfiles y registros relacionados en asistencias, entrenamientos, planes, comidas, registros y notificaciones. No duplica los datos si se ejecuta otra vez. Las cuentas usan correos como `demo.usuario001@gymcontrol.local` y la contraseña predeterminada `DemoGym2026!` (puede cambiarse con `--contrasena`).
+`sembrar_datos_demo` crea 100 cuentas de demostración, 20 por cada rol, con todos los campos de sus perfiles y registros relacionados en asistencias, entrenamientos, planes, comidas, registros y notificaciones. No duplica los datos si se ejecuta otra vez. Las cuentas usan correos como `demo.usuario001@gymcontrol.local` y la contraseña `DemoGym2026!` cuando `DJANGO_DEBUG=true` (puede cambiarse con `--contrasena`). Con `DJANGO_DEBUG=false` y sin `--contrasena`, el comando genera una contraseña aleatoria y la muestra al terminar, para no dejar cuentas con una contraseña publicada.
 
 Para crear una base SQLite independiente con 100 cuentas para cada uno de los cinco roles (500 usuarios en total), ejecuta en PowerShell desde la raíz del proyecto:
 
@@ -34,7 +59,7 @@ python backend\manage.py sembrar_datos_demo --por-rol 100
 python backend\manage.py runserver
 ```
 
-Mantén las variables `DB_ENGINE` y `DB_NAME` definidas en la misma terminal donde ejecutas `runserver` para que Django use esa base. Puedes iniciar sesión con las cuentas demo usando la contraseña indicada por el comando (por defecto, `DemoGym2026!`). Esta contraseña compartida es solo para pruebas locales; no publiques la base ni uses las cuentas demo en producción. El archivo de base generado está excluido de Git.
+Mantén las variables `DB_ENGINE` y `DB_NAME` definidas en la misma terminal donde ejecutas `runserver` para que Django use esa base. Puedes iniciar sesión con las cuentas demo usando la contraseña indicada por el comando (en desarrollo, `DemoGym2026!`). Esta contraseña compartida es solo para pruebas locales; no publiques la base ni uses las cuentas demo en producción. El archivo de base generado está excluido de Git.
 
 La API queda disponible en `http://127.0.0.1:8000/api/v1/`; las respuestas de datos son JSON y el navegador de DRF solo se muestra cuando se solicita HTML. La migración crea los cinco roles del esquema (`cliente`, `entrenador`, `terapeuta`, `recepcionista` y `administrador`).
 
@@ -84,7 +109,7 @@ El RBAC por recurso se complementa con alcance por rol y propiedad, de modo que 
 - Un usuario sin visibilidad sobre el registro recibe `404`; si carece del permiso de recurso recibe `403`. Nunca se filtra la existencia de datos ajenos.
 - Las sesiones se revocan al cambiar contraseña, desactivar la cuenta o cambiar los roles de un usuario; la sesión que hace el cambio se conserva. Los cambios de permisos **no** revocan sesiones: los permisos se leen de la base en cada petición, así que el menú y los accesos cambian al instante y el cliente refresca `/me/` al guardar o al volver a la pestaña. Cada cambio de roles/permisos queda registrado en `auditoria_eventos` y puede consultarse en `GET /api/v1/auditoria/` como administrador.
 
-La migración `0005` siembra los 90 permisos iniciales (18 recursos × 5 acciones), asigna la política inicial de los cinco roles y rellena `usuario_rol` para los usuarios existentes. La migración `0007` agrega el recurso `clientes-terapeutas` y sus 5 permisos, por lo que el catálogo final tiene 95 permisos. Los roles personalizados se crean con `POST /api/v1/roles/` y no reciben permisos por defecto; asígnalos con `PUT /api/v1/roles/{id}/permisos/`.
+La migración `0005` siembra los 90 permisos iniciales (18 recursos × 5 acciones), asigna la política inicial de los cinco roles y rellena `usuario_rol` para los usuarios existentes. La migración `0007` agrega el recurso `clientes-terapeutas` y sus 5 permisos, y las migraciones posteriores agregan más recursos (entre ellas `0017`, con los 30 permisos del módulo financiero), por lo que el catálogo actual tiene 125 permisos. Los roles personalizados se crean con `POST /api/v1/roles/` y no reciben permisos por defecto; asígnalos con `PUT /api/v1/roles/{id}/permisos/`.
 
 La migración `0006` normaliza la identidad: `correo` y `username` se guardan en minúsculas, los campos opcionales vacíos pasan a `NULL` y los únicos de correo, username, documento de cliente y licencia profesional se validan sin distinguir mayúsculas. Al hacer borrado lógico, el correo, username, documento y licencia se reemplazan por valores tumba, de modo que una cuenta nueva puede reutilizar la identidad original sin chocar con el registro histórico.
 

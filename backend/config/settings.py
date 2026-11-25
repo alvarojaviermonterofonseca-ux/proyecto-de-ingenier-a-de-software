@@ -250,7 +250,7 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Gym Control Pro API",
     "DESCRIPTION": "API versionada de Gym Control Pro.",
-    "VERSION": "1.0.0",
+    "VERSION": "1.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     # El esquema documenta la versión canónica; el alias /api/ se mantiene por
