@@ -3097,7 +3097,8 @@ class ResourceAliasDetailView(APIView):
             )
 
         nuevo_nombre = request.data.get("nombre_actual")
-        if not nuevo_nombre or not isinstance(nuevo_nombre, str):
+        # Un texto vacío es válido: significa quitar el alias (ver más abajo).
+        if not isinstance(nuevo_nombre, str):
             return Response(
                 {
                     "error": {
