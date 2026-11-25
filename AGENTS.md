@@ -7,8 +7,8 @@
 - The legacy panel at `/panel/` (`frontend/panel.html` + `frontend/static/panel.js`/`rbac.js`) is separate from the SPA; Django templates load it because `TEMPLATES["DIRS"]` points at `frontend/`.
 - SQLite is the fallback engine, but `DB_NAME` is required (`ImproperlyConfigured` otherwise); copy `backend/.env.example`. MySQL is selected with `DB_ENGINE=mysql` plus `DB_*`. `backend/.env` is untracked and machine-specific — never commit it, `*.sqlite3`, `frontend/dist/` or `media/`.
 - `DJANGO_DEBUG` defaults to false; outside debug, `DJANGO_SECRET_KEY` is also required. `backend/.env.example` sets `DJANGO_DEBUG=true`; process env wins over `.env`.
-- Root `package.json` is a leftover stub with no scripts; run npm from `frontend/`.
-- `README.md` covers routes, roles/policies, demo seeding and env vars, but its 90/95 permission counts are stale; `IMPLEMENTATION_SUMMARY.md` (if present) is an outdated status snapshot. Migrations/tests are authoritative.
+- There is no root `package.json`; run npm from `frontend/`.
+- `README.md` covers routes, roles/policies, demo seeding and env vars; `CONTRIBUTING.md` sets branch/commit/PR rules (Conventional Commits in Spanish, `feature/`/`fix/`/`docs/` branches, merge commits) and `CHANGELOG.md` must get an entry for user-visible changes. Migrations/tests are authoritative for counts.
 
 ## Commands
 
@@ -37,7 +37,7 @@ npm run build      # required before Django can serve /app/
 Verification:
 
 ```powershell
-python backend\manage.py test gym          # 137 tests
+python backend\manage.py test gym          # 155 tests
 python backend\manage.py test gym.tests.GymApiTests.test_roles_iniciales_y_rutas_crud_requieren_autenticacion
 python backend\manage.py check
 python backend\manage.py makemigrations --check --dry-run
@@ -47,7 +47,8 @@ cd frontend; npm run build
 - Always pass the `gym` label: `python backend\manage.py test` from the repo root discovers 0 tests.
 - `backend/manage.py` sets `TESTING=1` when the command is `test`, so the suite always runs on in-memory SQLite even if `.env` selects MySQL; `DB_NAME` is still required. Do not leave `TESTING` defined for `runserver`; it would switch the app to SQLite.
 - `backend/gym/tests.py` is the only test module and calls `sembrar_datos_demo`, so that command must stay.
-- No lint, formatter, typecheck or CI is configured. `npm test` (Karma) is broken: `karma-jasmine` is missing and there are no specs. `npm run build` is the frontend check.
+- CI: `.github/workflows/ci.yml` runs `check`, `makemigrations --check`, `test gym` (Python 3.12) and `npm ci && npm run build` (Node 20) on every push/PR to `main`. No lint or formatter is configured. The frontend has no specs and no `npm test` script (Karma was never installed); `npm run build` is the frontend check.
+- `sembrar_datos_demo` uses the documented password `DemoGym2026!` only with `DJANGO_DEBUG=true`; otherwise, without `--contrasena`, it generates a random one and prints it.
 - Production Angular uses `baseHref="/app/"`; the dev server uses `/`.
 
 ## Backend gotchas
@@ -66,13 +67,13 @@ cd frontend; npm run build
 - Errors always use `{"error": {"codigo", "mensaje", "detalles"}}`; unhandled `IntegrityError` becomes 409.
 - Food photos live under `PRIVATE_MEDIA_ROOT`, are never served from `/media/`, and are read through authenticated `GET /api/v1/registros-comida/{id}/foto/` (the SPA fetches a blob).
 - `GET /api/v1/conteos/` instantiates each menu ViewSet and counts `get_queryset()`, so badges always equal the matching list `count`.
-- Resource display names are file-backed, not a DB model: `gym/resource_aliases.py` writes `backend/resource_aliases.json` (the root `resource_aliases.json` is unused); `/api/v1/resource-aliases/` is readable by any authenticated user and PUT is admin-only. The SPA currently keeps aliases in `sessionStorage['gym_recursos_alias']` and does not call these endpoints.
+- Resource display names are file-backed, not a DB model: `gym/resource_aliases.py` writes `backend/resource_aliases.json` (the root `resource_aliases.json` is unused); `/api/v1/resource-aliases/` is readable by any authenticated user and PUT is platform-staff-only (an empty `nombre_actual` removes the alias). The SPA reads them from `GET /resource-aliases/` (menu and *Seguridad → Recursos*) and saves with `PUT`; gym admins get the backend's 403.
 
 ## Multi-tenant (one gym per user)
 
 - `Gimnasio` is the tenant. Every `Usuario` has a required `gimnasio` FK; there is no gym switcher. Django staff (`is_staff`, not a `Usuario`) is the platform: sees every gym, creates gyms in `/admin/` or with `crear_gimnasio`.
 - The gym is always taken from the authenticated user (`tenancy.gimnasio_id_de`), never from request params. `gym/tenancy.py` `RUTA_GIMNASIO` declares how each model reaches its gym; `ViewSetBase.get_queryset` and serializer FK choices filter through it. A new model must be added there (a test fails otherwise).
-- Login requires the gym code (`gimnasio` field); inactive gyms reject auth.
+- Login takes only `correo` and `contrasena`; the gym comes from the user (emails are unique platform-wide). Self-registration (`POST /registro/`) takes the gym code in `gimnasio` (optional when only one gym exists). Users of inactive gyms are rejected.
 - RBAC matrix rows (`RolPermiso`/`RolRecurso`) carry `gimnasio`; rows with NULL gym are the template copied to new gyms. System roles (`Rol.gimnasio` NULL) are shared and read-only for gyms; custom roles belong to a gym. The `Permiso`/`Recurso` catalog is writable only by platform staff. A future permission migration must seed the template **and** every existing gym.
 - Gym settings (`dias_inactividad_alerta`, `limite_gastos_mensual`, `porcentaje_caida_ingresos`) via `GET/PATCH /api/v1/gimnasio/` (PATCH admin-only) and `/financiero/configuracion` in the SPA.
 - Known platform-wide uniques: client document number and role names.
@@ -82,7 +83,7 @@ cd frontend; npm run build
 - Endpoints: `/api/v1/dashboard/`, `/metodos-pago/`, `/categorias-gasto/`, `/pagos/`, `/gastos/`, `/membresias/` and `/alertas/`. Migration `0017` adds 30 permissions for the six resources and grants them only to `administrador`; other roles need explicit grants.
 - `GET /dashboard/` is admin-only regardless of permissions and mutates state: it runs `alertas.generar_alertas_de(usuario)` (membership states + all alert rules for the gym) before responding. Accepts `?meses=3|6|12|24` and `?dias=7|14|30|90` for the chart windows (other values → 400). Its test caps the response at fewer than 60 SQL queries, so avoid per-day/per-month queries.
 - Scope: `Pago`/`Membresia` follow `filtrar_clientes`; `Alerta` follows the client's assignments; `Gasto`/`MetodoPago`/`CategoriaGasto` return `.none()` for non-admins.
-- `Membresia.save()` computes `estado` only on creation. Run `actualizar_membresias` daily (no scheduler is configured) or hit `/dashboard/` to refresh; `congelar` extends `fecha_fin`, `renovar` clamps month-end, and `activar` can leave it `vencida`.
+- `Membresia.save()` computes `estado` only on creation. `MembresiaViewSet` re-syncs the caller's gym (`Membresia.sincronizar_estados`) before list/retrieve/`estadisticas`/`exportar`; `actualizar_membresias` (daily, no scheduler configured) and `/dashboard/` also refresh it and generate alerts; `congelar` extends `fecha_fin`, `renovar` clamps month-end, and `activar` can leave it `vencida`.
 - `pagos`/`gastos`/`membresias` list, `/estadisticas/` and `/exportar/` share `fecha_desde`/`fecha_hasta`; invalid dates return 400. `registrado_por` and approval `aprobado_por` come from the session, not the payload.
 - Gastos with `estado=cancelado` are "anulados": listed, but excluded from totals, dashboard and reports.
 - `GET /api/v1/reportes/<tipo>/?formato=xlsx|pdf&fecha_desde=&fecha_hasta=` (admin-only; tipos: financiero, ingresos, gastos, asistencia, clientes, membresias, crecimiento) builds real-data reports in `gym/reportes.py` with openpyxl/reportlab; each download is audited as `exportar-reporte`.
