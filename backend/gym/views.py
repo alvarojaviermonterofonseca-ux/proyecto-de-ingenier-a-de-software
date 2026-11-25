@@ -2658,6 +2658,17 @@ class MembresiaViewSet(FiltroFechasMixin, ViewSetBase):
     search_fields = ("nombre", "cliente__usuario__nombre")
     ordering_fields = ("fecha_inicio", "fecha_fin", "estado", "created_at")
 
+    # Lecturas que muestran ``estado``: antes de responder se pone al día por
+    # fecha, porque ``Membresia.save()`` solo lo calcula al crear y no hay un
+    # programador que ejecute ``actualizar_membresias`` a diario.
+    acciones_con_estado = frozenset({"list", "retrieve", "estadisticas", "exportar"})
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.action in self.acciones_con_estado:
+            # El personal de plataforma no tiene gimnasio: se sincronizan todos.
+            Membresia.sincronizar_estados(gimnasio_id=gimnasio_id_de(request.user))
+
     def filtrar_alcance(self, queryset):
         return filtrar_clientes(queryset, "cliente", self.request.user)
 
