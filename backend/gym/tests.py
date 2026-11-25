@@ -3965,12 +3965,29 @@ class PlanesEntrenamientoConMusculosTests(EscenarioDosGimnasios):
         imagen = self.client.get(respuesta.data["imagen_url"])
         self.assertEqual(imagen.status_code, 200)
         self.assertEqual(imagen["Content-Type"], "image/png")
+        imagen.close()  # FileResponse deja el archivo abierto; en Windows impide borrarlo.
 
         ejercicio = Ejercicio.objects.get(pk=respuesta.data["id"])
         self.assertEqual(ejercicio.gimnasio, self.gym_a)
         quitar = self.client.patch(
             f"/api/v1/ejercicios/{ejercicio.pk}/", {"quitar_imagen": True}, format="json"
         )
+        self.assertEqual(quitar.status_code, 200, quitar.data)
+        self.assertIsNone(quitar.data["imagen_url"])
+
+    def test_quitar_imagen_responde_200_aunque_el_archivo_este_bloqueado(self):
+        self._autenticar(self.entrenador.usuario)
+        creado = self.client.post(
+            "/api/v1/ejercicios/",
+            {"nombre": "Remo", "imagen": self._png()},
+            format="multipart",
+        )
+        self.assertEqual(creado.status_code, 201, creado.data)
+        bloqueado = PermissionError(32, "El archivo está siendo utilizado por otro proceso")
+        with patch("gym.storage.AlmacenamientoFotosPrivadas.delete", side_effect=bloqueado):
+            quitar = self.client.patch(
+                f"/api/v1/ejercicios/{creado.data['id']}/", {"quitar_imagen": True}, format="json"
+            )
         self.assertEqual(quitar.status_code, 200, quitar.data)
         self.assertIsNone(quitar.data["imagen_url"])
 
@@ -4042,6 +4059,8 @@ class PlanesEntrenamientoConMusculosTests(EscenarioDosGimnasios):
         filas = self.client.get("/api/v1/planes-entrenamiento-ejercicios/", {"plan": plan_id}).data["results"]
         url = filas[0]["ejercicio_detalle"]["imagen_url"]
         self.assertIn("/planes-entrenamiento-ejercicios/", url)
-        self.assertEqual(self.client.get(url).status_code, 200)
+        imagen = self.client.get(url)
+        self.assertEqual(imagen.status_code, 200)
+        imagen.close()  # Libera el archivo para que se pueda borrar el directorio temporal.
         self.assertEqual(self.client.get(f"/api/v1/ejercicios/{ejercicio.pk}/imagen/").status_code, 403)
         self.assertEqual(self._plan().status_code, 403)
