@@ -4091,6 +4091,118 @@ class PlanesEntrenamientoConMusculosTests(EscenarioDosGimnasios):
         self.assertEqual(self.client.get(f"/api/v1/ejercicios/{ejercicio.pk}/imagen/").status_code, 403)
         self.assertEqual(self._plan().status_code, 403)
 
+    def _ejercicios(self, *nombres, gimnasio=None):
+        return [
+            Ejercicio.objects.create(gimnasio=gimnasio or self.gym_a, nombre=nombre, musculos=["pecho"])
+            for nombre in nombres
+        ]
+
+    def test_entrenador_guarda_varios_ejercicios_del_dia_de_una_vez(self):
+        self._autenticar(self.entrenador.usuario)
+        plan = self._plan().data
+        press, inclinado, hombro = self._ejercicios("Press banca", "Press inclinado", "Press militar")
+        ruta = f"/api/v1/planes-entrenamiento/{plan['id']}/dias/martes/"
+
+        respuesta = self.client.put(
+            ruta,
+            {
+                "titulo": "Push",
+                "musculos": ["pecho", "hombros"],
+                "ejercicios": [
+                    {"ejercicio": press.pk, "series": 3, "repeticiones": 6},
+                    {"ejercicio": inclinado.pk, "series": 3, "repeticiones": 8, "observaciones": "  lento  "},
+                    {"ejercicio": hombro.pk, "series": 4, "repeticiones": 10, "peso_kg": "12.5"},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        filas = respuesta.data["ejercicios"]
+        self.assertEqual([fila["ejercicio"] for fila in filas], [press.pk, inclinado.pk, hombro.pk])
+        self.assertEqual([fila["orden"] for fila in filas], [1, 2, 3])
+        self.assertEqual(sum(fila["series"] for fila in filas), 10)
+        self.assertEqual(filas[1]["observaciones"], "lento")
+        rutina = respuesta.data["plan"]["rutina"]
+        self.assertEqual(rutina["martes"], {"titulo": "Push", "musculos": ["pecho", "hombros"]})
+        # Los otros días del plan no se tocan.
+        self.assertEqual(rutina["lunes"]["titulo"], "Empuje")
+
+        # Guardar otra vez reemplaza la lista y su orden.
+        respuesta = self.client.put(
+            ruta,
+            {"ejercicios": [{"ejercicio": hombro.pk, "series": 5, "repeticiones": 5},
+                            {"ejercicio": press.pk, "series": 3, "repeticiones": 6}]},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual([fila["ejercicio"] for fila in respuesta.data["ejercicios"]], [hombro.pk, press.pk])
+        self.assertEqual(
+            PlanEntrenamientoEjercicio.objects.filter(plan_id=plan["id"], dia_semana="martes").count(), 2
+        )
+        # Sin titulo ni musculos, el día conserva los suyos.
+        self.assertEqual(respuesta.data["plan"]["rutina"]["martes"]["titulo"], "Push")
+
+        # Una lista vacía deja el día sin ejercicios.
+        respuesta = self.client.put(ruta, {"ejercicios": []}, format="json")
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(respuesta.data["ejercicios"], [])
+
+    def test_dia_con_error_no_guarda_nada(self):
+        self._autenticar(self.entrenador.usuario)
+        plan = self._plan().data
+        (press,) = self._ejercicios("Press banca")
+        ruta = f"/api/v1/planes-entrenamiento/{plan['id']}/dias/lunes/"
+        self.assertEqual(
+            self.client.put(ruta, {"ejercicios": [{"ejercicio": press.pk, "series": 3}]}, format="json").status_code,
+            200,
+        )
+
+        respuesta = self.client.put(
+            ruta,
+            {"ejercicios": [{"ejercicio": press.pk, "series": 4}, {"ejercicio": press.pk, "series": 0}]},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        filas = PlanEntrenamientoEjercicio.objects.filter(plan_id=plan["id"], dia_semana="lunes")
+        self.assertEqual([fila.series for fila in filas], [3])
+
+        respuesta = self.client.put(ruta, {"musculos": ["alas"], "ejercicios": []}, format="json")
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("musculos", respuesta.data["error"]["detalles"])
+        self.assertEqual(filas.count(), 1)
+
+        dia_invalido = f"/api/v1/planes-entrenamiento/{plan['id']}/dias/festivo/"
+        self.assertEqual(self.client.put(dia_invalido, {"ejercicios": []}, format="json").status_code, 404)
+
+    def test_dia_no_acepta_ejercicios_de_otro_gimnasio(self):
+        self._autenticar(self.entrenador.usuario)
+        plan = self._plan().data
+        (ajeno,) = self._ejercicios("Remo norte", gimnasio=self.gym_b)
+        respuesta = self.client.put(
+            f"/api/v1/planes-entrenamiento/{plan['id']}/dias/lunes/",
+            {"ejercicios": [{"ejercicio": ajeno.pk, "series": 3}]},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertFalse(PlanEntrenamientoEjercicio.objects.filter(plan_id=plan["id"]).exists())
+
+    def test_cliente_y_otro_gimnasio_no_arman_dias(self):
+        self._autenticar(self.entrenador.usuario)
+        plan = self._plan().data
+        (press,) = self._ejercicios("Press banca")
+        ruta = f"/api/v1/planes-entrenamiento/{plan['id']}/dias/lunes/"
+        cuerpo = {"ejercicios": [{"ejercicio": press.pk, "series": 3}]}
+
+        self._autenticar(self.cliente_a.usuario)
+        self.assertEqual(self.client.put(ruta, cuerpo, format="json").status_code, 403)
+        self._autenticar(self.admin_b)
+        self.assertEqual(self.client.put(ruta, cuerpo, format="json").status_code, 404)
+        self.assertFalse(PlanEntrenamientoEjercicio.objects.filter(plan_id=plan["id"]).exists())
+
+        # El administrador del gimnasio sí puede armar el día.
+        self._autenticar(self.admin_a)
+        self.assertEqual(self.client.put(ruta, cuerpo, format="json").status_code, 200)
+
 
 class AliasRecursosTests(APITestCase):
     """Nombres visibles de los recursos del menú (archivo JSON común)."""
