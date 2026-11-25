@@ -61,8 +61,9 @@ El build de producción usa `baseHref="/app/"`; las rutas profundas caen en
 
 ## Verificación
 
-No hay lint, formatter ni typecheck configurados. Las pruebas Karma no son
-utilizables (falta `karma-jasmine` y no hay specs). La verificación actual es:
+No hay lint ni formatter configurados, y todavía no hay pruebas unitarias del
+frontend (no hay specs ni script `npm test`). La compilación revisa los tipos y
+las plantillas, y la ejecuta el CI (`.github/workflows/ci.yml`) en cada PR:
 
 ```powershell
 npm run build
