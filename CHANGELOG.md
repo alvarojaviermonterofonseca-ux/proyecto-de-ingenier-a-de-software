@@ -14,6 +14,16 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   completo (nombre, músculos y ejercicios) se guarda con un solo botón «Guardar plan».
 - `PUT /api/v1/planes-entrenamiento/{id}/dias/{dia}/`: guarda el día completo en una transacción,
   reemplazando sus ejercicios en el orden recibido.
+- «Crear entrenamiento» incluye la rutina de la semana: en la misma ventana se nombra cada día
+  (Push, Pull, Pierna…) y se le agregan varios ejercicios a la vez. «Guardar plan» crea el plan y
+  todos sus días; si un día falla, el plan queda creado y el reintento guarda solo lo que faltó.
+- «Armar semana» edita todos los días del plan sin salir del editor (pestañas por día) y guarda de
+  una vez solo los días que cambiaron.
+
+### Corregido (rutina)
+
+- Al agregar ejercicios, solo se marcan en el día los músculos del catálogo: un código desconocido
+  no se podía desmarcar y hacía que el servidor rechazara el día.
 
 ### Corregido
 

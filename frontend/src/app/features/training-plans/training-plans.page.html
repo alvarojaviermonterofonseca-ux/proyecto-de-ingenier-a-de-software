@@ -4,7 +4,7 @@
     [title]="isClient() ? 'Mi entrenamiento' : 'Planes de entrenamiento'"
     [subtitle]="isClient()
       ? 'Tu rutina de la semana: lo que toca cada día y los músculos que trabajas.'
-      : 'Crea el plan de cada cliente, día por día, con los músculos y ejercicios que le tocan.'"
+      : 'Crea el plan de cada cliente: arma cada día con varios ejercicios, sus series y repeticiones.'"
   >
     @if (canCreate()) {
       <button class="button button--primary" type="button" (click)="openCreate()">
@@ -31,7 +31,7 @@
         [title]="isClient() ? 'Aún no tienes un plan' : 'Sin planes de entrenamiento'"
         [message]="isClient()
           ? 'Tu entrenador te asignará uno pronto. Aquí verás qué te toca cada día.'
-          : 'Usa «Crear entrenamiento», elige el cliente y arma cada día de la semana.'"
+          : 'Usa «Crear entrenamiento»: elige el cliente y arma cada día con sus ejercicios.'"
       />
     </section>
   } @else {
@@ -96,7 +96,7 @@
                 · {{ trainingDayCount() }} días de entreno
               </p>
             </div>
-            @if (!isClient()) {
+            @if (!isClient() && !dayEditorOpen()) {
               <div class="workout__actions">
                 @if (canEditPlan()) {
                   <button class="ghost-pill" type="button" (click)="openEdit(plan)" aria-label="Editar datos del plan">
@@ -112,250 +112,29 @@
             }
           </header>
 
-          <nav class="day-tabs" aria-label="Días de la semana">
-            @for (day of days(); track day.value) {
-              <button
-                type="button"
-                class="day-tab"
-                [class.is-active]="day.value === selectedDay()"
-                [class.is-rest]="!day.rows.length && !day.muscles.length"
-                [attr.aria-pressed]="day.value === selectedDay()"
-                (click)="selectDay(day.value)"
-              >
-                <span>{{ day.short }}</span>
-                <small>{{ day.rows.length || day.muscles.length ? day.title : 'Descanso' }}</small>
-              </button>
-            }
-          </nav>
+          @if (!dayEditorOpen()) {
+            <nav class="day-tabs" aria-label="Días de la semana">
+              @for (day of days(); track day.value) {
+                <button
+                  type="button"
+                  class="day-tab"
+                  [class.is-active]="day.value === selectedDay()"
+                  [class.is-rest]="!day.rows.length && !day.muscles.length"
+                  [attr.aria-pressed]="day.value === selectedDay()"
+                  (click)="selectDay(day.value)"
+                >
+                  <span>{{ day.short }}</span>
+                  <small>{{ day.rows.length || day.muscles.length ? day.title : 'Descanso' }}</small>
+                </button>
+              }
+            </nav>
+          }
 
           @if (currentDay(); as day) {
             <div class="workout__body">
               <div class="workout__main">
                 @if (dayEditorOpen()) {
-                  <!-- Armar el día: varios ejercicios a la vez y un solo «Guardar plan» -->
-                  <section class="builder" aria-label="Armar el día">
-                    <div class="builder__bar">
-                      <button class="text-button" type="button" (click)="cancelDayEditor()" [disabled]="daySaving()">
-                        Cancelar
-                      </button>
-                      <span class="builder__plan">
-                        {{ plan.nombre }}
-                        <app-icon name="wrench" [size]="15" />
-                      </span>
-                    </div>
-
-                    <div class="builder__head">
-                      <div class="builder__heading">
-                        <div class="builder__title-row">
-                          <input
-                            class="builder__title"
-                            type="text"
-                            maxlength="60"
-                            [placeholder]="day.label"
-                            [value]="dayTitle()"
-                            (input)="dayTitle.set($any($event.target).value)"
-                            aria-label="Nombre del día"
-                          />
-                          <button
-                            class="more-button"
-                            type="button"
-                            [class.is-active]="musclesOpen()"
-                            (click)="musclesOpen.set(!musclesOpen())"
-                            [attr.aria-expanded]="musclesOpen()"
-                            aria-label="Músculos del día"
-                          >
-                            <app-icon name="more" [size]="18" />
-                          </button>
-                        </div>
-                        <p class="builder__meta">
-                          {{ day.label }} · Día {{ day.index + 1 }} · {{ draft().length }}
-                          {{ draft().length === 1 ? 'ejercicio' : 'ejercicios' }} · {{ draftSets() }} series
-                        </p>
-                      </div>
-                    </div>
-
-                    @if (musclesOpen()) {
-                      <div class="builder__muscles">
-                        <p class="dark-hint">Marca los músculos del día aquí o en el cuerpo 3D. Al agregar ejercicios se marcan solos.</p>
-                        <app-muscle-picker
-                          [selected]="dayMuscles()"
-                          [showBody]="false"
-                          (selectedChange)="dayMuscles.set($event)"
-                        />
-                      </div>
-                    } @else if (dayMuscles().length) {
-                      <div class="muscle-tags" aria-label="Músculos del día">
-                        @for (code of dayMuscles(); track code) {
-                          <span class="muscle-tag">{{ muscleLabel(code) }}</span>
-                        }
-                      </div>
-                    }
-
-                    @if (editorError()) {
-                      <p class="builder__error" role="alert">
-                        <app-icon name="alert" [size]="16" /> {{ editorError() }}
-                      </p>
-                    }
-
-                    @if (draft().length) {
-                      <ol class="builder-list">
-                        @for (row of draft(); track row.key; let i = $index, first = $first, last = $last) {
-                          <li class="builder-row" [class.has-error]="rowErrors()[i]">
-                            <app-exercise-thumb
-                              [path]="apiPath(row.exercise.imagen_url)"
-                              [version]="row.exercise.updated_at"
-                              [name]="row.exercise.nombre"
-                              [size]="72"
-                            />
-                            <div class="builder-row__body">
-                              <div class="builder-row__top">
-                                <div class="builder-row__name">
-                                  <strong>{{ row.exercise.nombre }}</strong>
-                                  <span>{{ exerciseSubtitle(row.exercise) }}</span>
-                                </div>
-                                <div class="builder-row__tools">
-                                  <button
-                                    class="tool-button tool-button--up"
-                                    type="button"
-                                    [disabled]="first"
-                                    (click)="moveRow(i, -1)"
-                                    [attr.aria-label]="'Subir ' + row.exercise.nombre"
-                                  >
-                                    <app-icon name="chevron-down" [size]="15" />
-                                  </button>
-                                  <button
-                                    class="tool-button"
-                                    type="button"
-                                    [disabled]="last"
-                                    (click)="moveRow(i, 1)"
-                                    [attr.aria-label]="'Bajar ' + row.exercise.nombre"
-                                  >
-                                    <app-icon name="chevron-down" [size]="15" />
-                                  </button>
-                                  <button
-                                    class="tool-button"
-                                    type="button"
-                                    [class.is-active]="row.expanded"
-                                    (click)="toggleRowDetails(i)"
-                                    [attr.aria-expanded]="row.expanded"
-                                    [attr.aria-label]="'Más opciones de ' + row.exercise.nombre"
-                                  >
-                                    <app-icon name="more" [size]="15" />
-                                  </button>
-                                  <button
-                                    class="tool-button tool-button--danger"
-                                    type="button"
-                                    (click)="removeRow(i)"
-                                    [attr.aria-label]="'Quitar ' + row.exercise.nombre"
-                                  >
-                                    <app-icon name="x" [size]="15" />
-                                  </button>
-                                </div>
-                              </div>
-                              <div class="chips">
-                                <label class="chip" [class.is-invalid]="!inRange(row.series, 'series')">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="20"
-                                    inputmode="numeric"
-                                    [value]="row.series ?? ''"
-                                    (input)="setNumber(i, 'series', $any($event.target).value)"
-                                    [attr.aria-label]="'Series de ' + row.exercise.nombre"
-                                  />
-                                  <span>series</span>
-                                </label>
-                                <label class="chip" [class.is-invalid]="!inRange(row.repeticiones, 'repeticiones')">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="200"
-                                    inputmode="numeric"
-                                    [value]="row.repeticiones ?? ''"
-                                    (input)="setNumber(i, 'repeticiones', $any($event.target).value)"
-                                    [attr.aria-label]="'Repeticiones de ' + row.exercise.nombre"
-                                  />
-                                  <span>reps</span>
-                                </label>
-                                @if (!row.expanded && (row.peso_kg || row.descanso_segundos)) {
-                                  <span class="chip chip--soft">
-                                    {{ row.peso_kg ? row.peso_kg + ' kg' : '' }}{{ row.peso_kg && row.descanso_segundos ? ' · ' : '' }}{{ row.descanso_segundos ? row.descanso_segundos + ' s' : '' }}
-                                  </span>
-                                }
-                              </div>
-                              @if (row.expanded) {
-                                <div class="builder-row__extra">
-                                  <label class="dark-field">
-                                    <span>Peso (kg)</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.5"
-                                      placeholder="Opcional"
-                                      [value]="row.peso_kg"
-                                      (input)="setText(i, 'peso_kg', $any($event.target).value)"
-                                    />
-                                  </label>
-                                  <label class="dark-field" [class.has-error]="!inRange(row.descanso_segundos, 'descanso_segundos')">
-                                    <span>Descanso (s)</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max="900"
-                                      step="15"
-                                      [value]="row.descanso_segundos ?? ''"
-                                      (input)="setNumber(i, 'descanso_segundos', $any($event.target).value)"
-                                    />
-                                  </label>
-                                  <label class="dark-field dark-field--wide">
-                                    <span>Indicaciones</span>
-                                    <input
-                                      type="text"
-                                      maxlength="1000"
-                                      placeholder="Ej. bajar lento, codos a 45°"
-                                      [value]="row.observaciones"
-                                      (input)="setText(i, 'observaciones', $any($event.target).value)"
-                                    />
-                                  </label>
-                                </div>
-                              }
-                              @if (rowErrors()[i]; as message) {
-                                <p class="dark-error" role="alert">{{ message }}</p>
-                              }
-                            </div>
-                          </li>
-                        }
-                      </ol>
-                    } @else {
-                      <div class="rest-day">
-                        <strong>Sin ejercicios todavía</strong>
-                        <span>Usa «Agregar ejercicios» para elegir varios a la vez. Si guardas el día vacío, queda de descanso.</span>
-                      </div>
-                    }
-
-                    @if (exercises().length) {
-                      <button
-                        class="add-many"
-                        type="button"
-                        (click)="openPicker()"
-                        [disabled]="draft().length >= maxExercises"
-                      >
-                        <app-icon name="plus" [size]="17" />
-                        {{ draft().length >= maxExercises ? 'Máximo ' + maxExercises + ' ejercicios por día' : 'Agregar ejercicios' }}
-                      </button>
-                    } @else {
-                      <p class="dark-hint">
-                        No hay ejercicios en el catálogo. Créalos en «Ejercicios» (con su imagen) y vuelve aquí.
-                      </p>
-                    }
-
-                    <div class="builder__save">
-                      <button class="save-plan" type="button" (click)="saveDayPlan()" [disabled]="daySaving()">
-                        <app-icon name="clipboard" [size]="18" />
-                        {{ daySaving() ? 'Guardando…' : 'Guardar plan' }}
-                      </button>
-                    </div>
-                  </section>
+                  <ng-container [ngTemplateOutlet]="builderTpl" />
                 } @else {
                   <div class="day-head">
                     <div>
@@ -367,7 +146,7 @@
                     </div>
                     @if (canBuildDays()) {
                       <button class="blue-button" type="button" (click)="openDayEditor()">
-                        <app-icon name="edit" [size]="15" /> Armar {{ day.label.toLowerCase() }}
+                        <app-icon name="edit" [size]="15" /> Armar semana
                       </button>
                     }
                   </div>
@@ -389,7 +168,7 @@
                         @if (isClient()) {
                           {{ day.muscles.length ? 'Tu entrenador agregará los ejercicios.' : 'Recupera, hidrátate y duerme bien.' }}
                         } @else {
-                          Abre «Armar {{ day.label.toLowerCase() }}» para agregar varios ejercicios a la vez.
+                          Pulsa «Armar semana» para agregar varios ejercicios a la vez.
                         }
                       </span>
                     </div>
@@ -448,11 +227,396 @@
   }
 </div>
 
-<!-- Selector múltiple: agregar varios ejercicios al día de una vez -->
+<!--
+  Armado de la semana: pestañas por día y, en cada día, varios ejercicios a la vez
+  con sus series y repeticiones. Se usa en «Armar semana» y en «Crear entrenamiento».
+-->
+<ng-template #builderTpl>
+  <section class="builder" aria-label="Armar la semana">
+    @if (dayEditorOpen()) {
+      <div class="builder__bar">
+        <button class="text-button" type="button" (click)="cancelDayEditor()" [disabled]="daySaving()">
+          Cancelar
+        </button>
+        <span class="builder__plan">
+          {{ selectedPlan()?.nombre }}
+          <app-icon name="wrench" [size]="15" />
+        </span>
+      </div>
+    }
+
+    <nav class="builder-tabs" aria-label="Días de la semana">
+      @for (tab of builderTabs(); track tab.value) {
+        <button
+          type="button"
+          class="builder-tab"
+          [class.is-active]="tab.value === builderDay()"
+          [class.is-empty]="!tab.active"
+          [class.is-invalid]="tab.invalid"
+          [attr.aria-pressed]="tab.value === builderDay()"
+          [attr.aria-label]="tab.label + (tab.titulo ? ': ' + tab.titulo : '') + ', ' + tab.count + ' ejercicios'"
+          (click)="selectBuilderDay(tab.value)"
+        >
+          <span>{{ tab.titulo || tab.short }}</span>
+          <small>{{ tab.titulo ? tab.short + ' · ' : '' }}{{ tab.count ? tab.count + ' ej.' : (tab.titulo ? '0 ej.' : 'Descanso') }}</small>
+        </button>
+      }
+    </nav>
+
+    <div class="builder__head">
+      <div class="builder__heading">
+        <div class="builder__title-row">
+          <input
+            class="builder__title"
+            type="text"
+            maxlength="60"
+            [placeholder]="builderDayInfo().label"
+            [value]="dayTitle()"
+            (input)="setDayTitle($any($event.target).value)"
+            (keydown.enter)="$event.preventDefault()"
+            aria-label="Nombre del día"
+          />
+          <button
+            class="more-button"
+            type="button"
+            [class.is-active]="musclesOpen()"
+            (click)="musclesOpen.set(!musclesOpen())"
+            [attr.aria-expanded]="musclesOpen()"
+            aria-label="Músculos del día"
+          >
+            <app-icon name="more" [size]="18" />
+          </button>
+        </div>
+        <p class="builder__meta">
+          {{ builderDayInfo().label }} · Día {{ builderDayInfo().index + 1 }} · {{ draft().length }}
+          {{ draft().length === 1 ? 'ejercicio' : 'ejercicios' }} · {{ draftSets() }} series
+        </p>
+      </div>
+    </div>
+
+    @if (musclesOpen()) {
+      <div class="builder__muscles">
+        <p class="dark-hint">Marca los músculos del día. Al agregar ejercicios se marcan solos.</p>
+        <app-muscle-picker
+          [selected]="dayMuscles()"
+          [showBody]="false"
+          (selectedChange)="setDayMuscles($event)"
+        />
+      </div>
+    } @else if (dayMuscles().length) {
+      <div class="muscle-tags" aria-label="Músculos del día">
+        @for (code of dayMuscles(); track code) {
+          <span class="muscle-tag">{{ muscleLabel(code) }}</span>
+        }
+      </div>
+    }
+
+    @if (editorError()) {
+      <p class="builder__error" role="alert">
+        <app-icon name="alert" [size]="16" /> {{ editorError() }}
+      </p>
+    }
+
+    @if (draft().length) {
+      <ol class="builder-list">
+        @for (row of draft(); track row.key; let i = $index, first = $first, last = $last) {
+          <li class="builder-row" [class.has-error]="rowErrors()[i]">
+            <app-exercise-thumb
+              [path]="apiPath(row.exercise.imagen_url)"
+              [version]="row.exercise.updated_at"
+              [name]="row.exercise.nombre"
+              [size]="72"
+            />
+            <div class="builder-row__body">
+              <div class="builder-row__top">
+                <div class="builder-row__name">
+                  <strong>{{ row.exercise.nombre }}</strong>
+                  <span>{{ exerciseSubtitle(row.exercise) }}</span>
+                </div>
+                <div class="builder-row__tools">
+                  <button
+                    class="tool-button tool-button--up"
+                    type="button"
+                    [disabled]="first"
+                    (click)="moveRow(i, -1)"
+                    [attr.aria-label]="'Subir ' + row.exercise.nombre"
+                  >
+                    <app-icon name="chevron-down" [size]="15" />
+                  </button>
+                  <button
+                    class="tool-button"
+                    type="button"
+                    [disabled]="last"
+                    (click)="moveRow(i, 1)"
+                    [attr.aria-label]="'Bajar ' + row.exercise.nombre"
+                  >
+                    <app-icon name="chevron-down" [size]="15" />
+                  </button>
+                  <button
+                    class="tool-button"
+                    type="button"
+                    [class.is-active]="row.expanded"
+                    (click)="toggleRowDetails(i)"
+                    [attr.aria-expanded]="row.expanded"
+                    [attr.aria-label]="'Más opciones de ' + row.exercise.nombre"
+                  >
+                    <app-icon name="more" [size]="15" />
+                  </button>
+                  <button
+                    class="tool-button tool-button--danger"
+                    type="button"
+                    (click)="removeRow(i)"
+                    [attr.aria-label]="'Quitar ' + row.exercise.nombre"
+                  >
+                    <app-icon name="x" [size]="15" />
+                  </button>
+                </div>
+              </div>
+              <div class="chips">
+                <label class="chip" [class.is-invalid]="!inRange(row.series, 'series')">
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    inputmode="numeric"
+                    [value]="row.series ?? ''"
+                    (input)="setNumber(i, 'series', $any($event.target).value)"
+                    (keydown.enter)="$event.preventDefault()"
+                    [attr.aria-label]="'Series de ' + row.exercise.nombre"
+                  />
+                  <span>series</span>
+                </label>
+                <label class="chip" [class.is-invalid]="!inRange(row.repeticiones, 'repeticiones')">
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    inputmode="numeric"
+                    [value]="row.repeticiones ?? ''"
+                    (input)="setNumber(i, 'repeticiones', $any($event.target).value)"
+                    (keydown.enter)="$event.preventDefault()"
+                    [attr.aria-label]="'Repeticiones de ' + row.exercise.nombre"
+                  />
+                  <span>reps</span>
+                </label>
+                @if (!row.expanded && (row.peso_kg || row.descanso_segundos)) {
+                  <span class="chip chip--soft">
+                    {{ row.peso_kg ? row.peso_kg + ' kg' : '' }}{{ row.peso_kg && row.descanso_segundos ? ' · ' : '' }}{{ row.descanso_segundos ? row.descanso_segundos + ' s' : '' }}
+                  </span>
+                }
+              </div>
+              @if (row.expanded) {
+                <div class="builder-row__extra">
+                  <label class="dark-field">
+                    <span>Peso (kg)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      placeholder="Opcional"
+                      [value]="row.peso_kg"
+                      (input)="setText(i, 'peso_kg', $any($event.target).value)"
+                      (keydown.enter)="$event.preventDefault()"
+                    />
+                  </label>
+                  <label class="dark-field" [class.has-error]="!inRange(row.descanso_segundos, 'descanso_segundos')">
+                    <span>Descanso (s)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="900"
+                      step="15"
+                      [value]="row.descanso_segundos ?? ''"
+                      (input)="setNumber(i, 'descanso_segundos', $any($event.target).value)"
+                      (keydown.enter)="$event.preventDefault()"
+                    />
+                  </label>
+                  <label class="dark-field dark-field--wide">
+                    <span>Indicaciones</span>
+                    <input
+                      type="text"
+                      maxlength="1000"
+                      placeholder="Ej. bajar lento, codos a 45°"
+                      [value]="row.observaciones"
+                      (input)="setText(i, 'observaciones', $any($event.target).value)"
+                      (keydown.enter)="$event.preventDefault()"
+                    />
+                  </label>
+                </div>
+              }
+              @if (rowErrors()[i]; as message) {
+                <p class="dark-error" role="alert">{{ message }}</p>
+              }
+            </div>
+          </li>
+        }
+      </ol>
+    } @else {
+      <div class="rest-day">
+        <strong>{{ builderDayInfo().label }} sin ejercicios</strong>
+        <span>Usa «Agregar ejercicios» para elegir varios a la vez. Si lo dejas vacío, es día de descanso.</span>
+      </div>
+    }
+
+    @if (exercises().length) {
+      <button
+        class="add-many"
+        type="button"
+        (click)="openPicker()"
+        [disabled]="draft().length >= maxExercises"
+      >
+        <app-icon name="plus" [size]="17" />
+        {{ draft().length >= maxExercises
+          ? 'Máximo ' + maxExercises + ' ejercicios por día'
+          : 'Agregar ejercicios al ' + builderDayInfo().label.toLowerCase() }}
+      </button>
+    } @else {
+      <p class="dark-hint">
+        No hay ejercicios en el catálogo. Créalos en «Ejercicios» (con su imagen) y vuelve aquí.
+      </p>
+    }
+
+    @if (dayEditorOpen()) {
+      <div class="builder__save">
+        <button class="save-plan" type="button" (click)="saveDayPlan()" [disabled]="daySaving()">
+          <app-icon name="clipboard" [size]="18" />
+          {{ daySaving() ? 'Guardando…' : 'Guardar plan' }}
+        </button>
+      </div>
+    }
+  </section>
+</ng-template>
+
+<!-- Crear entrenamiento (datos + rutina de la semana) / editar datos del plan -->
+<app-modal
+  [open]="modalOpen()"
+  [title]="editing() ? 'Editar plan' : 'Crear entrenamiento'"
+  [subtitle]="editing()
+    ? 'Actualiza los datos generales del plan.'
+    : 'Elige el cliente y arma su semana: cada día con varios ejercicios, sus series y repeticiones.'"
+  size="wide"
+  (closed)="closeModal()"
+>
+  @if (formError()) {
+    <div class="notice notice--error" role="alert">
+      <app-icon name="alert" [size]="18" />
+      <span>{{ formError() }}</span>
+    </div>
+  }
+
+  <form id="plan-form" [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <div class="field" [class.has-error]="fieldError('cliente')">
+        <label for="plan-cliente">Cliente</label>
+        @if (fieldError('cliente'); as message) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+        <select id="plan-cliente" formControlName="cliente">
+          <option [ngValue]="0">Selecciona el cliente</option>
+          @for (client of clients(); track client.usuario) {
+            <option [ngValue]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
+          }
+        </select>
+        @if (!clients().length) {
+          <p class="field-hint">
+            {{ isTrainer() ? 'No tienes clientes asignados. Pide al administrador que te asigne uno.' : 'No hay clientes activos.' }}
+          </p>
+        }
+      </div>
+      @if (isTrainer()) {
+        <div class="field">
+          <label>Entrenador</label>
+          <p class="readonly-value">{{ auth.user()?.nombre }} (tú)</p>
+        </div>
+      } @else {
+        <div class="field" [class.has-error]="fieldError('entrenador')">
+          <label for="plan-entrenador">Entrenador responsable</label>
+          @if (fieldError('entrenador'); as message) {
+            <p class="field-error" role="alert">{{ message }}</p>
+          }
+          <select id="plan-entrenador" formControlName="entrenador">
+            <option [ngValue]="0">{{ trainerOptions().length ? 'Selecciona el entrenador' : 'Sin entrenadores asignados' }}</option>
+            @for (trainer of trainerOptions(); track trainer.usuario) {
+              <option [ngValue]="trainer.usuario">{{ trainer.nombre }}</option>
+            }
+          </select>
+          <p class="field-hint">Solo aparecen los entrenadores asignados a ese cliente.</p>
+        </div>
+      }
+      <div class="field" [class.has-error]="fieldError('nombre')">
+        <label for="plan-nombre">Nombre del plan</label>
+        @if (fieldError('nombre'); as message) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+        <input id="plan-nombre" formControlName="nombre" placeholder="Ej. Push · Pull · Pierna" />
+      </div>
+      <div class="field" [class.has-error]="fieldError('objetivo')">
+        <label for="plan-objetivo">Objetivo</label>
+        @if (fieldError('objetivo'); as message) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+        <input id="plan-objetivo" formControlName="objetivo" placeholder="Ej. Hipertrofia, fuerza, subir de peso" />
+      </div>
+      <div class="field" [class.has-error]="fieldError('fecha_inicio')">
+        <label for="plan-inicio">Inicio</label>
+        @if (fieldError('fecha_inicio'); as message) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+        <input id="plan-inicio" type="date" formControlName="fecha_inicio" />
+      </div>
+      <div class="field" [class.has-error]="fieldError('fecha_fin')">
+        <label for="plan-fin">Fin (opcional)</label>
+        @if (fieldError('fecha_fin'); as message) {
+          <p class="field-error" role="alert">{{ message }}</p>
+        }
+        <input id="plan-fin" type="date" formControlName="fecha_fin" />
+      </div>
+      <div class="field field--full">
+        <label for="plan-observaciones">Observaciones</label>
+        <textarea id="plan-observaciones" formControlName="observaciones" rows="2"></textarea>
+      </div>
+      <label class="check-field">
+        <input type="checkbox" formControlName="activo" />
+        <span>Plan activo</span>
+      </label>
+    </div>
+  </form>
+
+  @if (createWithRoutine()) {
+    <section class="create-routine" aria-label="Rutina de la semana">
+      <div class="create-routine__head">
+        <div>
+          <h3>Rutina de la semana</h3>
+          <p>
+            Elige un día, ponle nombre (Push, Pull, Pierna…) y agrega varios ejercicios a la vez. Los días que dejes
+            vacíos quedan de descanso.
+          </p>
+        </div>
+        <span class="create-routine__totals">
+          {{ weekTotals().days }} {{ weekTotals().days === 1 ? 'día' : 'días' }} ·
+          {{ weekTotals().exercises }} ejercicios · {{ weekTotals().sets }} series
+        </span>
+      </div>
+      <div class="workout builder-card">
+        <ng-container [ngTemplateOutlet]="builderTpl" />
+      </div>
+    </section>
+  }
+
+  <div class="form-actions">
+    <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">Cancelar</button>
+    <button class="button button--primary" type="submit" form="plan-form" [disabled]="saving()">
+      <app-icon [name]="editing() ? 'save' : 'clipboard'" [size]="16" />
+      {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Guardar plan' }}
+    </button>
+  </div>
+</app-modal>
+
+<!-- Selector múltiple: agregar varios ejercicios al día de una vez (encima de cualquier ventana) -->
 <app-modal
   [open]="pickerOpen()"
   title="Agregar ejercicios"
-  [subtitle]="'Marca todos los que quieras y se agregan juntos al ' + currentDay().label.toLowerCase() + '.'"
+  [subtitle]="'Marca todos los que quieras y se agregan juntos al ' + builderDayInfo().label.toLowerCase() + (dayTitle() ? ' (' + dayTitle() + ')' : '') + '.'"
   size="wide"
   (closed)="closePicker()"
 >
@@ -540,105 +704,4 @@
       Agregar {{ pickerSelected().length || '' }} {{ pickerSelected().length === 1 ? 'ejercicio' : 'ejercicios' }}
     </button>
   </div>
-</app-modal>
-
-<!-- Crear / editar plan -->
-<app-modal
-  [open]="modalOpen()"
-  [title]="editing() ? 'Editar plan' : 'Crear entrenamiento'"
-  [subtitle]="editing() ? 'Actualiza los datos generales del plan.' : 'Elige el cliente; luego armarás cada día con sus músculos y ejercicios.'"
-  size="wide"
-  (closed)="closeModal()"
->
-  @if (formError()) {
-    <div class="notice notice--error" role="alert">
-      <app-icon name="alert" [size]="18" />
-      <span>{{ formError() }}</span>
-    </div>
-  }
-
-  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
-    <div class="form-grid">
-      <div class="field" [class.has-error]="fieldError('cliente')">
-        <label for="plan-cliente">Cliente</label>
-        @if (fieldError('cliente'); as message) {
-          <p class="field-error" role="alert">{{ message }}</p>
-        }
-        <select id="plan-cliente" formControlName="cliente">
-          <option [ngValue]="0">Selecciona el cliente</option>
-          @for (client of clients(); track client.usuario) {
-            <option [ngValue]="client.usuario">{{ client.usuario_detalle.nombre }}</option>
-          }
-        </select>
-        @if (!clients().length) {
-          <p class="field-hint">
-            {{ isTrainer() ? 'No tienes clientes asignados. Pide al administrador que te asigne uno.' : 'No hay clientes activos.' }}
-          </p>
-        }
-      </div>
-      @if (isTrainer()) {
-        <div class="field">
-          <label>Entrenador</label>
-          <p class="readonly-value">{{ auth.user()?.nombre }} (tú)</p>
-        </div>
-      } @else {
-        <div class="field" [class.has-error]="fieldError('entrenador')">
-          <label for="plan-entrenador">Entrenador responsable</label>
-          @if (fieldError('entrenador'); as message) {
-            <p class="field-error" role="alert">{{ message }}</p>
-          }
-          <select id="plan-entrenador" formControlName="entrenador">
-            <option [ngValue]="0">{{ trainerOptions().length ? 'Selecciona el entrenador' : 'Sin entrenadores asignados' }}</option>
-            @for (trainer of trainerOptions(); track trainer.usuario) {
-              <option [ngValue]="trainer.usuario">{{ trainer.nombre }}</option>
-            }
-          </select>
-          <p class="field-hint">Solo aparecen los entrenadores asignados a ese cliente.</p>
-        </div>
-      }
-      <div class="field" [class.has-error]="fieldError('nombre')">
-        <label for="plan-nombre">Nombre del plan</label>
-        @if (fieldError('nombre'); as message) {
-          <p class="field-error" role="alert">{{ message }}</p>
-        }
-        <input id="plan-nombre" formControlName="nombre" placeholder="Ej. Empuje · Tirón · Pierna" />
-      </div>
-      <div class="field" [class.has-error]="fieldError('objetivo')">
-        <label for="plan-objetivo">Objetivo</label>
-        @if (fieldError('objetivo'); as message) {
-          <p class="field-error" role="alert">{{ message }}</p>
-        }
-        <input id="plan-objetivo" formControlName="objetivo" placeholder="Ej. Hipertrofia, fuerza, subir de peso" />
-      </div>
-      <div class="field" [class.has-error]="fieldError('fecha_inicio')">
-        <label for="plan-inicio">Inicio</label>
-        @if (fieldError('fecha_inicio'); as message) {
-          <p class="field-error" role="alert">{{ message }}</p>
-        }
-        <input id="plan-inicio" type="date" formControlName="fecha_inicio" />
-      </div>
-      <div class="field" [class.has-error]="fieldError('fecha_fin')">
-        <label for="plan-fin">Fin (opcional)</label>
-        @if (fieldError('fecha_fin'); as message) {
-          <p class="field-error" role="alert">{{ message }}</p>
-        }
-        <input id="plan-fin" type="date" formControlName="fecha_fin" />
-      </div>
-      <div class="field field--full">
-        <label for="plan-observaciones">Observaciones</label>
-        <textarea id="plan-observaciones" formControlName="observaciones" rows="2"></textarea>
-      </div>
-      <label class="check-field">
-        <input type="checkbox" formControlName="activo" />
-        <span>Plan activo</span>
-      </label>
-    </div>
-
-    <div class="form-actions">
-      <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">Cancelar</button>
-      <button class="button button--primary" type="submit" [disabled]="saving()">
-        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear y armar días' }}
-      </button>
-    </div>
-  </form>
 </app-modal>
