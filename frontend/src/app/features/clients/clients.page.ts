@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -8,6 +8,14 @@ import { ApiClient } from '../../core/api/api-client.service';
 import { ApiError } from '../../core/api/api-error';
 import type { ClientProfile, PaginatedResponse, Role } from '../../core/api/api.models';
 import { AuthService } from '../../core/auth/auth.service';
+import {
+  contrasenaNoNumerica,
+  erroresDelServidor,
+  fechaNoFutura,
+  mensajeValidacion,
+  telefonoValido,
+} from '../../core/forms/field-errors';
+import { roleLabel } from '../../core/rbac/permissions';
 import { ConfirmService } from '../../core/ui/confirm.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { dateInput, formatDate, humanize } from '../../core/utils/format';
@@ -55,31 +63,65 @@ export class ClientsPage implements OnInit {
   protected readonly formError = signal<string | null>(null);
   protected readonly modalOpen = signal(false);
   protected readonly editing = signal<ClientProfile | null>(null);
-  private readonly roles = signal<Role[]>([]);
+  protected readonly roles = signal<Role[]>([]);
+  /** Errores que devolvió la API, por campo del formulario. */
+  protected readonly serverErrors = signal<Record<string, string>>({});
+  protected readonly roleLabel = roleLabel;
 
   protected readonly search = this.formBuilder.nonNullable.control('');
   protected readonly activeFilter = this.formBuilder.nonNullable.control('');
   protected readonly documentFilter = this.formBuilder.nonNullable.control('');
 
   protected readonly form = this.formBuilder.nonNullable.group({
-    nombre: ['', [Validators.required]],
-    correo: ['', [Validators.required, Validators.email]],
-    telefono: [''],
+    rol: [0],
+    nombre: ['', [Validators.required, Validators.maxLength(150)]],
+    correo: ['', [Validators.required, Validators.email, Validators.maxLength(254)]],
+    telefono: ['', [telefonoValido]],
     contrasena: [''],
     tipo_documento: [''],
-    numero_documento: [''],
-    fecha_nacimiento: [''],
-    objetivo: [''],
-    peso_kg: [''],
-    estatura_cm: [''],
+    numero_documento: ['', [Validators.maxLength(30)]],
+    fecha_nacimiento: ['', [fechaNoFutura]],
+    objetivo: ['', [Validators.maxLength(255)]],
+    peso_kg: ['', [Validators.min(1), Validators.max(400)]],
+    estatura_cm: ['', [Validators.min(50), Validators.max(260)]],
     is_active: [true],
+  });
+
+  /** Valor reactivo del rol elegido, para mostrar u ocultar el perfil de cliente. */
+  private readonly rolElegido = signal(0);
+  protected readonly esCliente = computed(() => {
+    const rol = this.roles().find((item) => item.id === this.rolElegido());
+    return !rol || rol.nombre === 'cliente';
   });
 
   ngOnInit(): void {
     this.api.getAll<Role>('roles/', { is_active: true }).subscribe({
-      next: (roles) => this.roles.set(roles),
+      next: (roles) => {
+        this.roles.set(roles.filter((rol) => rol.is_active));
+        // Si el formulario se abrió antes de cargar los roles, queda en cliente.
+        const cliente = this.rolCliente();
+        if (cliente && !Number(this.form.controls.rol.value)) {
+          this.form.controls.rol.setValue(cliente.id);
+        }
+      },
       error: () => this.roles.set([]),
     });
+    this.form.controls.rol.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((rol) => this.rolElegido.set(Number(rol)));
+    // Al corregir un campo desaparece el error que la API dio para él.
+    for (const nombre of Object.keys(this.form.controls)) {
+      const control = this.form.get(nombre);
+      control?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+        if (this.serverErrors()[nombre]) {
+          const { [nombre]: _, ...resto } = this.serverErrors();
+          this.serverErrors.set(resto);
+        }
+      });
+    }
+    this.form.controls.tipo_documento.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.form.controls.numero_documento.updateValueAndValidity({ emitEvent: false }));
     this.load();
     this.search.valueChanges
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
@@ -134,10 +176,25 @@ export class ClientsPage implements OnInit {
     );
   }
 
+  /** Error a mostrar encima del campo: primero el de la API, luego el local. */
+  protected fieldError(nombre: keyof typeof this.form.controls): string | null {
+    const servidor = this.serverErrors()[nombre];
+    if (servidor) return servidor;
+    const control = this.form.controls[nombre];
+    return control.touched && control.invalid ? mensajeValidacion(control) : null;
+  }
+
+  private rolCliente(): Role | undefined {
+    return this.roles().find((role) => role.nombre === 'cliente');
+  }
+
   protected openCreate(): void {
     this.editing.set(null);
     this.formError.set(null);
+    this.serverErrors.set({});
+    const rolInicial = this.rolCliente()?.id ?? 0;
     this.form.reset({
+      rol: rolInicial,
       nombre: '',
       correo: '',
       telefono: '',
@@ -153,15 +210,23 @@ export class ClientsPage implements OnInit {
     this.form.controls.nombre.enable();
     this.form.controls.correo.enable();
     this.form.controls.telefono.enable();
-    this.form.controls.contrasena.setValidators([Validators.required, Validators.minLength(8)]);
+    this.form.controls.contrasena.setValidators([
+      Validators.required,
+      Validators.minLength(8),
+      contrasenaNoNumerica,
+    ]);
     this.form.controls.contrasena.updateValueAndValidity();
+    this.form.controls.rol.enable();
+    this.rolElegido.set(rolInicial);
     this.modalOpen.set(true);
   }
 
   protected openEdit(client: ClientProfile): void {
     this.editing.set(client);
     this.formError.set(null);
+    this.serverErrors.set({});
     this.form.reset({
+      rol: this.rolCliente()?.id ?? 0,
       nombre: client.usuario_detalle.nombre,
       correo: client.usuario_detalle.correo,
       telefono: client.usuario_detalle.telefono ?? '',
@@ -179,6 +244,8 @@ export class ClientsPage implements OnInit {
     this.form.controls.telefono.disable();
     this.form.controls.contrasena.clearValidators();
     this.form.controls.contrasena.updateValueAndValidity();
+    this.form.controls.rol.disable();
+    this.rolElegido.set(this.rolCliente()?.id ?? 0);
     this.modalOpen.set(true);
   }
 
@@ -190,8 +257,16 @@ export class ClientsPage implements OnInit {
 
   protected save(): void {
     this.formError.set(null);
-    if (this.form.invalid) {
+    this.serverErrors.set({});
+    const identidad = ['rol', 'nombre', 'correo', 'telefono', 'contrasena'];
+    // Con un rol distinto de cliente los datos de perfil no se envían.
+    const invalido =
+      this.editing() || this.esCliente()
+        ? this.form.invalid
+        : identidad.some((campo) => this.form.get(campo)?.invalid);
+    if (invalido) {
       this.form.markAllAsTouched();
+      this.formError.set('Revisa los campos marcados: cada uno indica qué hay que corregir.');
       return;
     }
     const raw = this.form.getRawValue();
@@ -215,20 +290,23 @@ export class ClientsPage implements OnInit {
       return;
     }
 
-    const clientRole = this.roles().find((role) => role.nombre === 'cliente');
-    if (!clientRole) {
+    const rol = this.roles().find((role) => role.id === Number(raw.rol));
+    if (!rol) {
       this.saving.set(false);
-      this.formError.set('No se encontró el rol de cliente. Contacta al administrador.');
+      this.serverErrors.set({ rol: 'Elige el rol que tendrá la cuenta.' });
+      this.formError.set('Revisa los campos marcados: cada uno indica qué hay que corregir.');
       return;
     }
+    // Solo el rol cliente lleva este perfil; los demás roles se crean con
+    // un perfil vacío y se completan en su propio módulo.
     const payload = {
-      rol: clientRole.id,
+      rol: rol.id,
       nombre: raw.nombre.trim(),
       correo: raw.correo.trim(),
       telefono: raw.telefono.trim() || null,
       contrasena: raw.contrasena,
       is_active: true,
-      perfil: profile,
+      perfil: rol.nombre === 'cliente' ? profile : {},
     };
     this.api.post('usuarios/', payload).subscribe({
       next: () => this.saved(null),
@@ -260,14 +338,35 @@ export class ClientsPage implements OnInit {
   private saved(editing: ClientProfile | null): void {
     this.saving.set(false);
     this.modalOpen.set(false);
-    this.toast.success(editing ? 'Cliente actualizado' : 'Cliente creado');
+    if (editing) {
+      this.toast.success('Cliente actualizado');
+    } else {
+      const rol = this.roles().find((item) => item.id === Number(this.form.controls.rol.value));
+      this.toast.success(
+        rol && rol.nombre !== 'cliente' ? `Usuario creado con rol ${roleLabel(rol.nombre)}` : 'Cliente creado',
+      );
+    }
     this.load();
   }
 
   private failed(error: unknown): void {
     this.saving.set(false);
-    this.formError.set(
-      error instanceof ApiError ? error.fieldErrors()['correo'] || error.message : 'No se pudo guardar el cliente.',
-    );
+    const porCampo = erroresDelServidor(error);
+    const campos = Object.keys(this.form.controls);
+    const conocidos = Object.fromEntries(Object.entries(porCampo).filter(([campo]) => campos.includes(campo)));
+    this.serverErrors.set(conocidos);
+    for (const campo of Object.keys(conocidos)) {
+      this.form.get(campo)?.markAsTouched();
+    }
+    const otros = Object.entries(porCampo)
+      .filter(([campo]) => !campos.includes(campo))
+      .map(([, mensaje]) => mensaje);
+    if (Object.keys(conocidos).length && !otros.length) {
+      this.formError.set('Revisa los campos marcados: cada uno indica qué hay que corregir.');
+    } else if (otros.length) {
+      this.formError.set(otros.join(' '));
+    } else {
+      this.formError.set(error instanceof ApiError ? error.message : 'No se pudo guardar el cliente.');
+    }
   }
 }

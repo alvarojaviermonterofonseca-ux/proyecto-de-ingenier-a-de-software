@@ -1,5 +1,6 @@
-from datetime import date, timedelta
-from io import BytesIO
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from io import BytesIO, StringIO
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,13 +16,15 @@ from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from PIL import Image
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from config.env import cargar_env
 
 from .models import (
     Administrador,
+    Alerta,
     Asistencia,
+    CategoriaGasto,
     Cliente,
     ClienteEntrenador,
     ClienteTerapeuta,
@@ -30,7 +33,12 @@ from .models import (
     Entrenador,
     Entrenamiento,
     EventoAuditoria,
+    Gasto,
+    Gimnasio,
+    Membresia,
+    MetodoPago,
     Notificacion,
+    Pago,
     Permiso,
     PlanAlimentacion,
     PlanEntrenamiento,
@@ -46,6 +54,11 @@ from .models import (
     Usuario,
     UsuarioRol,
 )
+
+
+def gimnasio_principal():
+    """Gimnasio que la migración 0020 crea para los datos existentes."""
+    return Gimnasio.objects.get(codigo="principal")
 
 
 class GymApiTests(APITestCase):
@@ -344,9 +357,10 @@ class GymApiTests(APITestCase):
 
     def test_no_administrador_no_puede_cambiar_rol_estado_ni_asignaciones(self):
         self.autenticar()
-        rol_gestor = Rol.objects.create(nombre="gestor-usuarios")
+        rol_gestor = Rol.objects.create(gimnasio=gimnasio_principal(), nombre="gestor-usuarios")
         for codigo in ("usuarios:view", "usuarios:create", "usuarios:edit"):
             RolPermiso.objects.create(
+                gimnasio=gimnasio_principal(),
                 rol=rol_gestor, permiso=Permiso.objects.get(codigo=codigo)
             )
 
@@ -399,9 +413,10 @@ class GymApiTests(APITestCase):
         cliente = self.crear_usuario_con_rol(
             Rol.Nombre.CLIENTE, "cliente.estado.propio@example.com"
         )
-        rol_gestor = Rol.objects.create(nombre="gestor-estado-propio")
+        rol_gestor = Rol.objects.create(gimnasio=gimnasio_principal(), nombre="gestor-estado-propio")
         for codigo in ("usuarios:view", "usuarios:edit"):
             RolPermiso.objects.create(
+                gimnasio=gimnasio_principal(),
                 rol=rol_gestor, permiso=Permiso.objects.get(codigo=codigo)
             )
         UsuarioRol.objects.create(
@@ -422,9 +437,10 @@ class GymApiTests(APITestCase):
         self.assertTrue(Usuario.objects.get(pk=cliente["id"]).is_active)
 
     def test_contrasena_ajena_requiere_administrador_y_revoca_sesiones(self):
-        rol_gestor = Rol.objects.create(nombre="gestor-contrasenas")
+        rol_gestor = Rol.objects.create(gimnasio=gimnasio_principal(), nombre="gestor-contrasenas")
         for codigo in ("usuarios:view", "usuarios:edit"):
             RolPermiso.objects.create(
+                gimnasio=gimnasio_principal(),
                 rol=rol_gestor, permiso=Permiso.objects.get(codigo=codigo)
             )
 
@@ -652,6 +668,109 @@ class GymApiTests(APITestCase):
 
         self.assertEqual(respuesta.status_code, 401)
 
+    def test_registro_publico_crea_cliente_y_abre_sesion(self):
+        respuesta = self.client.post(
+            "/api/v1/registro/",
+            {
+                "nombre": "  Laura Pérez  ",
+                "correo": "LAURA@Example.com",
+                "contrasena": "ClaveSegura123",
+                "telefono": "3001234567",
+                "objetivo": "Ganar fuerza",
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertTrue(respuesta.data["token"])
+        self.assertEqual(respuesta.data["tipo_token"], "Bearer")
+        self.assertIn("expira_at", respuesta.data)
+        self.assertEqual(respuesta.data["usuario"]["correo"], "laura@example.com")
+        self.assertEqual(
+            respuesta.data["usuario"]["rol_detalle"]["nombre"],
+            Rol.Nombre.CLIENTE,
+        )
+        self.assertNotIn("contrasena", respuesta.data["usuario"])
+        self.assertNotIn("contrasena_hash", respuesta.data["usuario"])
+
+        usuario = Usuario.objects.get(correo="laura@example.com")
+        self.assertEqual(usuario.nombre, "Laura Pérez")
+        self.assertEqual(usuario.rol.nombre, Rol.Nombre.CLIENTE)
+        self.assertTrue(usuario.is_active)
+        self.assertTrue(usuario.check_password("ClaveSegura123"))
+        self.assertTrue(usuario.contrasena_hash.startswith("argon2"))
+        self.assertTrue(
+            Cliente.objects.filter(
+                pk=usuario.pk, objetivo="Ganar fuerza"
+            ).exists()
+        )
+
+        perfil = self.client.get(
+            "/api/v1/me/",
+            HTTP_AUTHORIZATION=f"Bearer {respuesta.data['token']}",
+        )
+        self.assertEqual(perfil.status_code, 200)
+        self.assertEqual(perfil.data["correo"], "laura@example.com")
+
+    def test_registro_publico_ignora_rol_y_estado_enviados(self):
+        rol_admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+
+        respuesta = self.client.post(
+            "/api/v1/registro/",
+            {
+                "nombre": "Intruso",
+                "correo": "intruso@example.com",
+                "contrasena": "ClaveSegura123",
+                "rol": rol_admin.pk,
+                "roles_asignados": [rol_admin.pk],
+                "is_active": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        usuario = Usuario.objects.get(correo="intruso@example.com")
+        self.assertEqual(usuario.rol.nombre, Rol.Nombre.CLIENTE)
+        self.assertTrue(usuario.is_active)
+        self.assertFalse(
+            usuario.asignaciones_usuarios.filter(rol=rol_admin).exists()
+        )
+
+    def test_registro_publico_rechaza_correo_duplicado(self):
+        self.crear_cliente()
+        self.client.credentials()
+
+        respuesta = self.client.post(
+            "/api/v1/registro/",
+            {
+                "nombre": "Ana Duplicada",
+                "correo": "ANA@example.com",
+                "contrasena": "OtraClaveSegura123",
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.data)
+        self.assertIn("correo", respuesta.data["error"]["detalles"])
+        self.assertEqual(
+            Usuario.objects.filter(correo="ana@example.com").count(), 1
+        )
+
+    def test_registro_publico_valida_contrasena(self):
+        respuesta = self.client.post(
+            "/api/v1/registro/",
+            {
+                "nombre": "Clave Débil",
+                "correo": "debil@example.com",
+                "contrasena": "12345678",
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.data)
+        self.assertIn("contrasena", respuesta.data["error"]["detalles"])
+        self.assertFalse(Usuario.objects.filter(correo="debil@example.com").exists())
+
     def test_token_permite_consultar_perfil_y_logout_lo_revoca(self):
         token = self.autenticar()
 
@@ -681,16 +800,23 @@ class GymApiTests(APITestCase):
         self.assertEqual(respuesta.data["error"]["codigo"], 400)
 
     def test_migracion_siembra_permisos_y_politicas_por_rol(self):
-        self.assertEqual(Permiso.objects.count(), 95)
+        self.assertEqual(Permiso.objects.count(), 125)
         admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
-        self.assertEqual(RolPermiso.objects.filter(rol=admin).count(), 95)
+        principal = gimnasio_principal()
+        # La matriz existe dos veces: como plantilla (sin gimnasio) para los
+        # gimnasios nuevos y como matriz efectiva del gimnasio principal.
+        for gimnasio in (None, principal):
+            with self.subTest(gimnasio=gimnasio):
+                self.assertEqual(
+                    RolPermiso.objects.filter(rol=admin, gimnasio=gimnasio).count(), 125
+                )
+                self.assertEqual(
+                    RolRecurso.objects.filter(rol=admin, gimnasio=gimnasio).count(),
+                    Recurso.objects.count(),
+                )
         self.assertEqual(
             Recurso.objects.count(),
             Permiso.objects.values("recurso").distinct().count(),
-        )
-        self.assertEqual(
-            RolRecurso.objects.filter(rol=admin).count(),
-            Recurso.objects.count(),
         )
         self.autenticar()
         rol_api = self.client.get(f"/api/roles/{admin.pk}/")
@@ -698,7 +824,9 @@ class GymApiTests(APITestCase):
         self.assertIn("usuarios", rol_api.data["recursos"])
         cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
         codigos = set(
-            RolPermiso.objects.filter(rol=cliente).values_list("permiso__codigo", flat=True)
+            RolPermiso.objects.filter(rol=cliente, gimnasio=principal).values_list(
+                "permiso__codigo", flat=True
+            )
         )
         self.assertIn("clientes:view", codigos)
         self.assertIn("registros-comida:create", codigos)
@@ -706,7 +834,7 @@ class GymApiTests(APITestCase):
         terapeuta = Rol.objects.get(nombre=Rol.Nombre.TERAPEUTA)
         self.assertTrue(
             RolPermiso.objects.filter(
-                rol=terapeuta, permiso__codigo="clientes-terapeutas:view"
+                rol=terapeuta, permiso__codigo="clientes-terapeutas:view", gimnasio=principal
             ).exists()
         )
 
@@ -738,15 +866,22 @@ class GymApiTests(APITestCase):
 
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(set(respuesta.data["permisos"]), {"clientes:view", "clientes:export"})
-        self.assertEqual(RolPermiso.objects.filter(rol=cliente).count(), 2)
+        principal = gimnasio_principal()
+        self.assertEqual(RolPermiso.objects.filter(rol=cliente, gimnasio=principal).count(), 2)
         self.assertTrue(
-            RolRecurso.objects.filter(rol=cliente, recurso__nombre="clientes").exists()
+            RolRecurso.objects.filter(
+                rol=cliente, recurso__nombre="clientes", gimnasio=principal
+            ).exists()
         )
+        # La plantilla de los gimnasios nuevos no cambia.
+        self.assertGreater(RolPermiso.objects.filter(rol=cliente, gimnasio=None).count(), 2)
 
     def test_permiso_exige_puente_rol_recurso_activo(self):
         """No basta la concesión por acción: debe existir rol_has_recurso."""
         admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
-        puente = RolRecurso.objects.get(rol=admin, recurso__nombre="usuarios")
+        puente = RolRecurso.objects.get(
+            rol=admin, recurso__nombre="usuarios", gimnasio=gimnasio_principal()
+        )
 
         self.assertTrue(self.operador.tiene_permiso("usuarios:view"))
         puente.delete()
@@ -906,6 +1041,111 @@ class GymApiTests(APITestCase):
 
         self.assertFalse(UsuarioRol.objects.get(usuario=usuario, rol=entrenador_role).activo)
         self.assertNotIn("entrenamientos:create", set(usuario.permisos_efectivos()))
+
+    def test_puede_cambiar_rol_principal_desde_asignacion_de_roles(self):
+        self.autenticar()
+        respuesta = self.crear_cliente()
+        usuario = Usuario.objects.get(pk=respuesta.data["id"])
+        cliente_role = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+        entrenador_role = Rol.objects.get(nombre=Rol.Nombre.ENTRENADOR)
+
+        cambio = self.client.patch(
+            f"/api/usuarios/{usuario.pk}/roles/",
+            {"roles": [], "rol_principal": entrenador_role.pk},
+            format="json",
+        )
+
+        self.assertEqual(cambio.status_code, 200, cambio.data)
+        usuario.refresh_from_db()
+        self.assertEqual(usuario.rol_id, entrenador_role.pk)
+        self.assertFalse(Cliente.objects.filter(pk=usuario.pk).exists())
+        self.assertTrue(Entrenador.objects.filter(pk=usuario.pk).exists())
+        self.assertTrue(
+            UsuarioRol.objects.filter(
+                usuario=usuario, rol=entrenador_role, activo=True
+            ).exists()
+        )
+        self.assertFalse(
+            UsuarioRol.objects.filter(
+                usuario=usuario, rol=cliente_role, activo=True
+            ).exists()
+        )
+        self.assertEqual(cambio.data["rol_detalle"]["nombre"], Rol.Nombre.ENTRENADOR)
+
+    def test_cambio_de_rol_principal_no_borra_perfil_con_datos(self):
+        self.autenticar()
+        respuesta = self.crear_cliente()
+        usuario = Usuario.objects.get(pk=respuesta.data["id"])
+        Asistencia.objects.create(
+            cliente=usuario.cliente, entrada_at=timezone.now()
+        )
+        entrenador_role = Rol.objects.get(nombre=Rol.Nombre.ENTRENADOR)
+
+        cambio = self.client.patch(
+            f"/api/usuarios/{usuario.pk}/roles/",
+            {"roles": [], "rol_principal": entrenador_role.pk},
+            format="json",
+        )
+
+        self.assertEqual(cambio.status_code, 400, cambio.data)
+        self.assertIn("rol_principal", cambio.data["error"]["detalles"])
+        usuario.refresh_from_db()
+        self.assertEqual(usuario.rol.nombre, Rol.Nombre.CLIENTE)
+        self.assertTrue(Cliente.objects.filter(pk=usuario.pk).exists())
+
+    def test_roles_endpoint_protege_al_ultimo_administrador(self):
+        self.autenticar()
+        cliente_role = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+
+        cambio = self.client.patch(
+            f"/api/usuarios/{self.operador.pk}/roles/",
+            {"roles": [], "rol_principal": cliente_role.pk},
+            format="json",
+        )
+
+        self.assertEqual(cambio.status_code, 400, cambio.data)
+        self.assertIn("rol_principal", cambio.data["error"]["detalles"])
+        self.operador.refresh_from_db()
+        self.assertEqual(self.operador.rol.nombre, Rol.Nombre.ADMINISTRADOR)
+
+    def test_solo_administrador_puede_cambiar_rol_principal(self):
+        self.autenticar()
+        usuario = self.crear_usuario_con_rol(
+            Rol.Nombre.CLIENTE, "delegado.roles@example.com"
+        )
+        rol_delegado = self.client.post(
+            "/api/roles/",
+            {"nombre": "delegado-roles", "descripcion": "Puede asignar roles"},
+            format="json",
+        )
+        self.assertEqual(rol_delegado.status_code, 201, rol_delegado.data)
+        rol_id = rol_delegado.data["id"]
+        permisos = self.client.put(
+            f"/api/roles/{rol_id}/permisos/",
+            {"permisos": ["usuarios:edit", "roles:edit"]},
+            format="json",
+        )
+        self.assertEqual(permisos.status_code, 200, permisos.data)
+        asignacion = self.client.patch(
+            f"/api/usuarios/{usuario['id']}/roles/",
+            {"roles": [rol_id]},
+            format="json",
+        )
+        self.assertEqual(asignacion.status_code, 200, asignacion.data)
+
+        self.client.credentials()
+        self.autenticar_como("delegado.roles@example.com", "UnaClaveSegura123")
+        entrenador_role = Rol.objects.get(nombre=Rol.Nombre.ENTRENADOR)
+        cambio = self.client.patch(
+            f"/api/usuarios/{usuario['id']}/roles/",
+            {"roles": [rol_id], "rol_principal": entrenador_role.pk},
+            format="json",
+        )
+
+        self.assertEqual(cambio.status_code, 400, cambio.data)
+        self.assertIn("rol_principal", cambio.data["error"]["detalles"])
+        usuario_db = Usuario.objects.get(pk=usuario["id"])
+        self.assertEqual(usuario_db.rol.nombre, Rol.Nombre.CLIENTE)
 
     def test_administrador_adicional_puede_gestionar_roles_y_permisos(self):
         self.autenticar()
@@ -1656,6 +1896,7 @@ class GymApiTests(APITestCase):
         RolPermiso.objects.filter(
             rol__nombre=Rol.Nombre.TERAPEUTA,
             permiso__codigo="registros-comida:edit",
+            gimnasio=gimnasio_principal(),
         ).delete()
         sin_permiso = self.client.post(
             "/api/registros-comida/",
@@ -1688,9 +1929,10 @@ class GymApiTests(APITestCase):
         self.assertIn("usuario", inactiva.data["error"]["detalles"])
         Usuario.objects.filter(pk=objetivo["id"]).update(is_active=True)
 
-        rol_emisor = Rol.objects.create(nombre="emisor-notificaciones")
+        rol_emisor = Rol.objects.create(gimnasio=gimnasio_principal(), nombre="emisor-notificaciones")
         for codigo in ("notificaciones:view", "notificaciones:create"):
             RolPermiso.objects.create(
+                gimnasio=gimnasio_principal(),
                 rol=rol_emisor, permiso=Permiso.objects.get(codigo=codigo)
             )
         emisor = Usuario(
@@ -1951,7 +2193,20 @@ class GymApiTests(APITestCase):
 
         self._token_operador = None
         self.autenticar()
-        respuesta_permiso = self.client.delete(
+        # El catálogo de permisos es común a todos los gimnasios: un
+        # administrador de gimnasio no puede borrarlo.
+        self.assertEqual(
+            self.client.delete(
+                f"/api/permisos/{permiso.pk}/", HTTP_ACCEPT="application/json"
+            ).status_code,
+            403,
+        )
+        plataforma = APIClient()
+        get_user_model().objects.create_superuser(
+            username="plataforma", email="plataforma@example.com", password="ClavePlataforma123"
+        )
+        self.assertTrue(plataforma.login(username="plataforma", password="ClavePlataforma123"))
+        respuesta_permiso = plataforma.delete(
             f"/api/permisos/{permiso.pk}/", HTTP_ACCEPT="application/json"
         )
         self.assertEqual(respuesta_permiso.status_code, 204, respuesta_permiso.data)
@@ -2164,7 +2419,7 @@ class GymApiTests(APITestCase):
 
     def test_cambios_de_permisos_de_rol_generan_auditoria(self):
         self.autenticar()
-        rol = Rol.objects.create(nombre="rol-auditado")
+        rol = Rol.objects.create(gimnasio=gimnasio_principal(), nombre="rol-auditado")
         codigo = "roles:view"
 
         respuesta = self.client.put(
@@ -2231,3 +2486,1562 @@ class CargarEnvTests(SimpleTestCase):
                 cargar_env(faltante)
 
                 self.assertEqual(dict(os.environ), {"CLAVE": "del-proceso"})
+
+
+class FinancieroApiTests(APITestCase):
+    """Módulo financiero: pagos, gastos, membresías, alertas y dashboard."""
+
+    CLAVE = "OtraClaveSegura123"
+
+    def setUp(self):
+        cache.clear()
+        self.admin = self._crear_usuario(
+            Rol.Nombre.ADMINISTRADOR, "Admin Finanzas", "finanzas@example.com"
+        )
+        usuario_cliente = self._crear_usuario(
+            Rol.Nombre.CLIENTE, "Carla Ruiz", "carla@example.com"
+        )
+        self.cliente = Cliente.objects.create(
+            usuario=usuario_cliente, tipo_documento="CC", numero_documento="900100"
+        )
+        self.metodo = MetodoPago.objects.create(
+            nombre="Efectivo prueba", tipo=MetodoPago.Tipo.EFECTIVO
+        )
+        self.categoria = CategoriaGasto.objects.create(
+            nombre="Arriendo prueba", tipo=CategoriaGasto.Tipo.ARRIENDO
+        )
+        self.hoy = timezone.localdate()
+        self._autenticar(self.admin)
+
+    def _crear_usuario(self, nombre_rol, nombre, correo):
+        usuario = Usuario(
+            rol=Rol.objects.get(nombre=nombre_rol), nombre=nombre, correo=correo
+        )
+        usuario.set_password(self.CLAVE)
+        usuario.full_clean()
+        usuario.save()
+        return usuario
+
+    def _autenticar(self, usuario):
+        self.client.credentials()
+        respuesta = self.client.post(
+            "/api/v1/login/",
+            {"correo": usuario.correo, "contrasena": self.CLAVE},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {respuesta.data['token']}"
+        )
+
+    def _membresia(self, fecha_fin, **extra):
+        datos = {
+            "cliente": self.cliente,
+            "tipo": Membresia.Tipo.MENSUAL,
+            "nombre": "Mensual estándar",
+            "precio": Decimal("80000"),
+            "fecha_inicio": fecha_fin - timedelta(days=30),
+            "fecha_fin": fecha_fin,
+            "registrado_por": self.admin,
+        }
+        datos.update(extra)
+        return Membresia.objects.create(**datos)
+
+    def _pago(self, valor, **extra):
+        datos = {
+            "cliente": self.cliente,
+            "concepto": Pago.Concepto.MEMBRESIA,
+            "valor": Decimal(valor),
+            "metodo_pago": self.metodo,
+            "registrado_por": self.admin,
+        }
+        datos.update(extra)
+        return Pago.objects.create(**datos)
+
+    def _gasto(self, valor, **extra):
+        datos = {
+            "descripcion": "Arriendo del mes",
+            "categoria": self.categoria,
+            "valor": Decimal(valor),
+            "fecha": self.hoy,
+            "metodo_pago": self.metodo,
+            "registrado_por": self.admin,
+        }
+        datos.update(extra)
+        return Gasto.objects.create(**datos)
+
+    def test_rutas_financieras_requieren_autenticacion(self):
+        self.client.credentials()
+        for ruta in (
+            "/api/v1/dashboard/",
+            "/api/v1/pagos/",
+            "/api/v1/gastos/",
+            "/api/v1/membresias/",
+            "/api/v1/alertas/",
+            "/api/v1/metodos-pago/",
+            "/api/v1/categorias-gasto/",
+        ):
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.client.get(ruta).status_code, 401)
+
+    def test_administrador_registra_y_lista_un_pago(self):
+        respuesta = self.client.post(
+            "/api/v1/pagos/",
+            {
+                "cliente": self.cliente.pk,
+                "concepto": Pago.Concepto.MEMBRESIA,
+                "valor": "80000.00",
+                "metodo_pago": self.metodo.pk,
+                "registrado_por": self.admin.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["estado"], Pago.Estado.COMPLETADO)
+
+        listado = self.client.get("/api/v1/pagos/")
+        self.assertEqual(listado.status_code, 200)
+        self.assertEqual(listado.data["count"], 1)
+        self.assertTrue(
+            EventoAuditoria.objects.filter(recurso="pagos", accion="crear").exists()
+        )
+
+    def test_pago_rechaza_valor_no_positivo(self):
+        respuesta = self.client.post(
+            "/api/v1/pagos/",
+            {
+                "cliente": self.cliente.pk,
+                "concepto": Pago.Concepto.OTRO,
+                "valor": "0",
+                "metodo_pago": self.metodo.pk,
+                "registrado_por": self.admin.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertEqual(Pago.objects.count(), 0)
+
+    def test_estadisticas_de_pagos_separan_completados_y_pendientes(self):
+        self._pago("80000")
+        self._pago("20000", concepto=Pago.Concepto.PRODUCTO)
+        self._pago("50000", estado=Pago.Estado.PENDIENTE)
+
+        respuesta = self.client.get("/api/v1/pagos/estadisticas/")
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(Decimal(respuesta.data["total_ingresos"]), Decimal("100000"))
+        self.assertEqual(Decimal(respuesta.data["total_pendientes"]), Decimal("50000"))
+        self.assertEqual(respuesta.data["count_completados"], 2)
+        self.assertEqual(respuesta.data["count_pendientes"], 1)
+        self.assertEqual(len(respuesta.data["por_concepto"]), 2)
+
+    def test_estadisticas_de_gastos_agrupan_por_categoria(self):
+        self._gasto("300000")
+        self._gasto("50000", fecha=self.hoy - timedelta(days=90))
+
+        respuesta = self.client.get("/api/v1/gastos/estadisticas/")
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(Decimal(respuesta.data["total_gastos"]), Decimal("350000"))
+        self.assertEqual(respuesta.data["count"], 2)
+        self.assertEqual(
+            respuesta.data["por_categoria"][0]["categoria__nombre"],
+            self.categoria.nombre,
+        )
+
+        filtrado = self.client.get(
+            "/api/v1/gastos/estadisticas/",
+            {"fecha_desde": (self.hoy - timedelta(days=7)).isoformat()},
+        )
+        self.assertEqual(Decimal(filtrado.data["total_gastos"]), Decimal("300000"))
+
+    def test_membresia_calcula_su_estado_al_crearse(self):
+        self.assertEqual(
+            self._membresia(self.hoy + timedelta(days=20)).estado,
+            Membresia.Estado.ACTIVA,
+        )
+        self.assertEqual(
+            self._membresia(self.hoy + timedelta(days=3)).estado,
+            Membresia.Estado.POR_VENCER,
+        )
+        self.assertEqual(
+            self._membresia(self.hoy - timedelta(days=1)).estado,
+            Membresia.Estado.VENCIDA,
+        )
+
+    def test_sincronizar_estados_vence_membresias_con_el_paso_del_tiempo(self):
+        activa = self._membresia(self.hoy + timedelta(days=20))
+        congelada = self._membresia(self.hoy + timedelta(days=20))
+        cancelada = self._membresia(self.hoy + timedelta(days=20))
+        Membresia.objects.filter(pk=congelada.pk).update(
+            estado=Membresia.Estado.CONGELADA
+        )
+        Membresia.objects.filter(pk=cancelada.pk).update(
+            estado=Membresia.Estado.CANCELADA
+        )
+
+        cambios = Membresia.sincronizar_estados(hoy=self.hoy + timedelta(days=15))
+        activa.refresh_from_db()
+        congelada.refresh_from_db()
+        self.assertEqual(activa.estado, Membresia.Estado.POR_VENCER)
+        self.assertEqual(cambios["por_vencer"], 1)
+        # Dentro de su vigencia, una congelada sigue congelada.
+        self.assertEqual(congelada.estado, Membresia.Estado.CONGELADA)
+
+        cambios = Membresia.sincronizar_estados(hoy=self.hoy + timedelta(days=40))
+        activa.refresh_from_db()
+        congelada.refresh_from_db()
+        cancelada.refresh_from_db()
+        self.assertEqual(activa.estado, Membresia.Estado.VENCIDA)
+        # Pasada su fecha de fin, la congelada también vence.
+        self.assertEqual(congelada.estado, Membresia.Estado.VENCIDA)
+        self.assertEqual(cambios["vencidas"], 2)
+        self.assertEqual(cancelada.estado, Membresia.Estado.CANCELADA)
+
+    def test_comando_actualizar_membresias_sincroniza_estados(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+        Membresia.objects.filter(pk=membresia.pk).update(
+            fecha_inicio=self.hoy - timedelta(days=60),
+            fecha_fin=self.hoy - timedelta(days=2),
+        )
+
+        salida = StringIO()
+        call_command("actualizar_membresias", stdout=salida)
+
+        membresia.refresh_from_db()
+        self.assertEqual(membresia.estado, Membresia.Estado.VENCIDA)
+        self.assertIn("vencidas: 1", salida.getvalue())
+
+    def test_renovar_extiende_la_vigencia_por_meses(self):
+        fecha_fin = date(2026, 1, 31)
+        membresia = self._membresia(fecha_fin)
+
+        respuesta = self.client.post(
+            f"/api/v1/membresias/{membresia.pk}/renovar/",
+            {"meses": 1},
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        membresia.refresh_from_db()
+        # 31 de enero + 1 mes se ajusta al último día de febrero.
+        self.assertEqual(membresia.fecha_fin, date(2026, 2, 28))
+        self.assertEqual(membresia.fecha_ultima_renovacion, fecha_fin)
+
+    def test_renovar_reactiva_una_membresia_vencida(self):
+        membresia = self._membresia(self.hoy - timedelta(days=1))
+        self.assertEqual(membresia.estado, Membresia.Estado.VENCIDA)
+
+        respuesta = self.client.post(
+            f"/api/v1/membresias/{membresia.pk}/renovar/",
+            {"meses": 3, "tipo": Membresia.Tipo.TRIMESTRAL},
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(respuesta.data["estado"], Membresia.Estado.ACTIVA)
+        self.assertEqual(respuesta.data["tipo"], Membresia.Tipo.TRIMESTRAL)
+
+    def test_renovar_rechaza_meses_y_tipo_invalidos(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+        fecha_fin = membresia.fecha_fin
+
+        for carga in ({"meses": "abc"}, {"meses": 0}, {"meses": -2}, {"tipo": "eterna"}):
+            with self.subTest(carga=carga):
+                respuesta = self.client.post(
+                    f"/api/v1/membresias/{membresia.pk}/renovar/", carga, format="json"
+                )
+                self.assertEqual(respuesta.status_code, 400, respuesta.data)
+
+        membresia.refresh_from_db()
+        self.assertEqual(membresia.fecha_fin, fecha_fin)
+
+    def test_congelar_y_activar_membresia(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+
+        congelada = self.client.post(
+            f"/api/v1/membresias/{membresia.pk}/congelar/", {"dias": 5}, format="json"
+        )
+        self.assertEqual(congelada.status_code, 200, congelada.data)
+        self.assertEqual(congelada.data["estado"], Membresia.Estado.CONGELADA)
+        self.assertEqual(congelada.data["dias_congelados"], 5)
+        # Los días congelados corren el vencimiento: no se pierden.
+        self.assertEqual(
+            congelada.data["fecha_fin"],
+            (self.hoy + timedelta(days=25)).isoformat(),
+        )
+
+        repetida = self.client.post(
+            f"/api/v1/membresias/{membresia.pk}/congelar/", {"dias": 5}, format="json"
+        )
+        self.assertEqual(repetida.status_code, 400)
+
+        activa = self.client.post(f"/api/v1/membresias/{membresia.pk}/activar/")
+        self.assertEqual(activa.status_code, 200, activa.data)
+        self.assertEqual(activa.data["estado"], Membresia.Estado.ACTIVA)
+        self.assertEqual(
+            set(
+                EventoAuditoria.objects.filter(recurso="membresias").values_list(
+                    "accion", flat=True
+                )
+            ),
+            {"congelar", "activar"},
+        )
+
+    def test_congelar_rechaza_dias_invalidos(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+
+        for dias in ("abc", -5, 0, 1000, None):
+            with self.subTest(dias=dias):
+                respuesta = self.client.post(
+                    f"/api/v1/membresias/{membresia.pk}/congelar/",
+                    {"dias": dias},
+                    format="json",
+                )
+                self.assertEqual(respuesta.status_code, 400, respuesta.data)
+
+        membresia.refresh_from_db()
+        self.assertEqual(membresia.estado, Membresia.Estado.ACTIVA)
+        self.assertEqual(membresia.dias_congelados, 0)
+
+    def test_activar_una_congelada_ya_vencida_la_deja_vencida(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+        Membresia.objects.filter(pk=membresia.pk).update(
+            estado=Membresia.Estado.CONGELADA,
+            fecha_inicio=self.hoy - timedelta(days=60),
+            fecha_fin=self.hoy - timedelta(days=3),
+        )
+
+        respuesta = self.client.post(f"/api/v1/membresias/{membresia.pk}/activar/")
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(respuesta.data["estado"], Membresia.Estado.VENCIDA)
+
+    def test_fechas_invalidas_en_filtros_devuelven_400(self):
+        for ruta in (
+            "/api/v1/pagos/estadisticas/?fecha_desde=xx",
+            "/api/v1/gastos/estadisticas/?fecha_hasta=2026-13-40",
+            "/api/v1/pagos/?fecha_desde=ayer",
+            "/api/v1/gastos/?fecha_desde=2026-05-10&fecha_hasta=2026-05-01",
+        ):
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.client.get(ruta).status_code, 400)
+
+    def test_listado_estadisticas_y_exportacion_comparten_el_filtro_de_fechas(self):
+        self._pago("80000")
+        self._pago("20000", fecha_pago=timezone.now() - timedelta(days=60))
+        rango = {
+            "fecha_desde": (self.hoy - timedelta(days=7)).isoformat(),
+            "fecha_hasta": self.hoy.isoformat(),
+        }
+
+        listado = self.client.get("/api/v1/pagos/", rango)
+        estadisticas = self.client.get("/api/v1/pagos/estadisticas/", rango)
+        exportado = self.client.get("/api/v1/pagos/exportar/", rango)
+
+        self.assertEqual(listado.data["count"], 1)
+        self.assertEqual(Decimal(estadisticas.data["total_ingresos"]), Decimal("80000"))
+        # Encabezado más una sola fila.
+        self.assertEqual(len(exportado.content.decode().strip().splitlines()), 2)
+        self.assertEqual(self.client.get("/api/v1/pagos/").data["count"], 2)
+
+    def test_page_size_lo_decide_el_cliente_con_un_tope(self):
+        for _ in range(3):
+            self._gasto("1000")
+
+        respuesta = self.client.get("/api/v1/gastos/", {"page_size": 2})
+
+        self.assertEqual(respuesta.data["count"], 3)
+        self.assertEqual(len(respuesta.data["results"]), 2)
+        self.assertIsNotNone(respuesta.data["next"])
+
+    def test_pago_toma_registrado_por_de_la_sesion(self):
+        otro = self._crear_usuario(
+            Rol.Nombre.RECEPCIONISTA, "Rosa Recepción", "rosa@example.com"
+        )
+
+        respuesta = self.client.post(
+            "/api/v1/pagos/",
+            {
+                "cliente": self.cliente.pk,
+                "concepto": Pago.Concepto.MATRICULA,
+                "valor": "30000",
+                "metodo_pago": self.metodo.pk,
+                "registrado_por": otro.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["registrado_por"], self.admin.pk)
+
+    def test_pago_rechaza_membresia_de_otro_cliente(self):
+        usuario = self._crear_usuario(Rol.Nombre.CLIENTE, "Luis Mora", "luis@example.com")
+        otro_cliente = Cliente.objects.create(usuario=usuario)
+        ajena = self._membresia(self.hoy + timedelta(days=20), cliente=otro_cliente)
+
+        respuesta = self.client.post(
+            "/api/v1/pagos/",
+            {
+                "cliente": self.cliente.pk,
+                "membresia": ajena.pk,
+                "concepto": Pago.Concepto.MEMBRESIA,
+                "valor": "80000",
+                "metodo_pago": self.metodo.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 400, respuesta.data)
+        self.assertIn("membresia", respuesta.data["error"]["detalles"])
+
+    def test_gasto_registra_quien_lo_aprueba(self):
+        otro = self._crear_usuario(
+            Rol.Nombre.RECEPCIONISTA, "Rosa Recepción", "rosa@example.com"
+        )
+        creado = self.client.post(
+            "/api/v1/gastos/",
+            {
+                "descripcion": "Mantenimiento de caminadoras",
+                "categoria": self.categoria.pk,
+                "valor": "120000",
+                "fecha": self.hoy.isoformat(),
+                "metodo_pago": self.metodo.pk,
+                "aprobado_por": otro.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(creado.status_code, 201, creado.data)
+        self.assertEqual(creado.data["estado"], Gasto.Estado.REGISTRADO)
+        self.assertEqual(creado.data["registrado_por"], self.admin.pk)
+        self.assertIsNone(creado.data["aprobado_por"])
+
+        aprobado = self.client.patch(
+            f"/api/v1/gastos/{creado.data['id']}/",
+            {"estado": Gasto.Estado.APROBADO, "aprobado_por": otro.pk},
+            format="json",
+        )
+        self.assertEqual(aprobado.status_code, 200, aprobado.data)
+        self.assertEqual(aprobado.data["aprobado_por"], self.admin.pk)
+        self.assertIsNotNone(aprobado.data["fecha_aprobacion"])
+
+    def test_exportacion_csv_neutraliza_formulas(self):
+        self._pago("5000", notas='=HYPERLINK("http://example.com")')
+        self._pago("7000", notas="-2 unidades devueltas")
+
+        contenido = self.client.get("/api/v1/pagos/exportar/").content.decode()
+
+        self.assertIn("'=HYPERLINK", contenido)
+        self.assertIn("'-2 unidades devueltas", contenido)
+        self.assertNotIn(",=HYPERLINK", contenido)
+        # Los números no se tocan.
+        self.assertIn("5000.00", contenido)
+        self.assertNotIn("'5000.00", contenido)
+
+    def test_alertas_se_ordenan_de_critica_a_baja(self):
+        for prioridad in ("baja", "critica", "media", "alta"):
+            Alerta.objects.create(
+                tipo=Alerta.Tipo.GASTOS_ALTOS,
+                prioridad=prioridad,
+                titulo=f"Alerta {prioridad}",
+                mensaje="Detalle.",
+            )
+        esperado = ["critica", "alta", "media", "baja"]
+
+        listado = self.client.get("/api/v1/alertas/")
+        dashboard = self.client.get("/api/v1/dashboard/")
+
+        self.assertEqual([a["prioridad"] for a in listado.data["results"]], esperado)
+        self.assertEqual(
+            [a["prioridad"] for a in dashboard.data["alertas_recientes"]], esperado
+        )
+
+    def test_alertas_de_membresias_se_generan_una_sola_vez(self):
+        por_vencer = self._membresia(self.hoy + timedelta(days=3))
+        vencida = self._membresia(self.hoy - timedelta(days=2))
+        self._membresia(self.hoy + timedelta(days=25))
+
+        self.assertEqual(Alerta.generar_de_membresias(), 2)
+        self.assertEqual(Alerta.generar_de_membresias(), 0)
+
+        alerta_vencida = Alerta.objects.get(membresia=vencida)
+        self.assertEqual(alerta_vencida.tipo, Alerta.Tipo.MEMBRESIA_VENCIDA)
+        self.assertEqual(alerta_vencida.prioridad, Alerta.Prioridad.ALTA)
+        self.assertEqual(alerta_vencida.cliente, self.cliente)
+        self.assertEqual(
+            Alerta.objects.get(membresia=por_vencer).tipo,
+            Alerta.Tipo.MEMBRESIA_POR_VENCER,
+        )
+
+        # Tras renovar y volver a acercarse al vencimiento, avisa de nuevo.
+        Membresia.objects.filter(pk=vencida.pk).update(
+            fecha_fin=self.hoy + timedelta(days=5),
+            estado=Membresia.Estado.POR_VENCER,
+        )
+        self.assertEqual(Alerta.generar_de_membresias(), 1)
+
+    def test_graficas_del_dashboard_cubren_doce_meses_consecutivos(self):
+        inicio_mes = timezone.localtime().replace(
+            day=1, hour=12, minute=0, second=0, microsecond=0
+        )
+        mes_pasado = inicio_mes - timedelta(days=10)
+        self._pago("40000", fecha_pago=mes_pasado)
+        self._gasto("15000", fecha=mes_pasado.date())
+
+        graficas = self.client.get("/api/v1/dashboard/").data["graficas"]
+
+        esperados = []
+        anio, mes = self.hoy.year, self.hoy.month
+        for _ in range(12):
+            esperados.append(f"{anio:04d}-{mes:02d}")
+            anio, mes = (anio - 1, 12) if mes == 1 else (anio, mes - 1)
+        esperados.reverse()
+
+        serie = graficas["ingresos_vs_gastos"]
+        self.assertEqual([punto["mes"] for punto in serie], esperados)
+        self.assertEqual(
+            [punto["mes"] for punto in graficas["crecimiento_clientes"]], esperados
+        )
+        self.assertEqual(serie[-2]["ingresos"], 40000.0)
+        self.assertEqual(serie[-2]["gastos"], 15000.0)
+        self.assertEqual(graficas["crecimiento_clientes"][-1]["nuevos"], 1)
+
+    def test_gasto_se_edita_y_anulado_no_suma(self):
+        gasto = self._gasto("50000")
+        self._gasto("20000", descripcion="Servicio de internet")
+
+        respuesta = self.client.patch(
+            f"/api/v1/gastos/{gasto.id}/", {"valor": "45000"}, format="json"
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        respuesta = self.client.patch(
+            f"/api/v1/gastos/{gasto.id}/", {"estado": "cancelado"}, format="json"
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+
+        stats = self.client.get("/api/v1/gastos/estadisticas/").data
+        self.assertEqual(Decimal(str(stats["total_gastos"])), Decimal("20000"))
+        self.assertEqual(stats["count_anulados"], 1)
+        financieras = self.client.get("/api/v1/dashboard/").data["metricas_financieras"]
+        self.assertEqual(financieras["gastos"]["mes"], 20000.0)
+
+        busqueda = self.client.get("/api/v1/gastos/?search=internet").data
+        self.assertEqual(busqueda["count"], 1)
+
+    def test_dashboard_acepta_periodos_de_graficas(self):
+        hace_cinco_meses = timezone.localtime() - timedelta(days=150)
+        self._pago("70000", fecha_pago=hace_cinco_meses)
+
+        respuesta = self.client.get("/api/v1/dashboard/?meses=6&dias=7")
+        self.assertEqual(respuesta.status_code, 200)
+        graficas = respuesta.data["graficas"]
+        self.assertEqual(len(graficas["ingresos_vs_gastos"]), 6)
+        self.assertEqual(len(graficas["ganancias_mensuales"]), 6)
+        self.assertEqual(len(graficas["crecimiento_clientes"]), 6)
+        self.assertEqual(len(graficas["asistencias_por_dia"]), 7)
+        self.assertEqual(graficas["periodo"], {"meses": 6, "dias": 7})
+        self.assertEqual(
+            sum(punto["ingresos"] for punto in graficas["ingresos_vs_gastos"]), 70000.0
+        )
+
+        respuesta = self.client.get("/api/v1/dashboard/?meses=24&dias=90")
+        self.assertEqual(len(respuesta.data["graficas"]["ingresos_vs_gastos"]), 24)
+        self.assertEqual(len(respuesta.data["graficas"]["asistencias_por_dia"]), 90)
+
+        for consulta in ("meses=5", "meses=abc", "dias=31", "dias=-7"):
+            respuesta = self.client.get(f"/api/v1/dashboard/?{consulta}")
+            self.assertEqual(respuesta.status_code, 400, consulta)
+
+    def test_dashboard_resume_asistencias_por_dia_y_hora(self):
+        ahora = timezone.localtime().replace(hour=7, minute=30, second=0, microsecond=0)
+        for dias in (1, 1, 2):
+            entrada = ahora - timedelta(days=dias)
+            Asistencia.objects.create(
+                cliente=self.cliente,
+                entrada_at=entrada,
+                salida_at=entrada + timedelta(hours=1),
+            )
+
+        with CaptureQueriesContext(connection) as consultas:
+            respuesta = self.client.get("/api/v1/dashboard/")
+
+        asistencias = respuesta.data["metricas_asistencias"]
+        self.assertEqual(asistencias["hora_pico"], "07:00")
+        self.assertEqual(asistencias["promedio_diario"], 1.5)
+        por_dia = {
+            punto["fecha"]: punto["total"]
+            for punto in respuesta.data["graficas"]["asistencias_por_dia"]
+        }
+        self.assertEqual(por_dia[(self.hoy - timedelta(days=1)).isoformat()], 2)
+        self.assertEqual(por_dia[(self.hoy - timedelta(days=2)).isoformat()], 1)
+        self.assertEqual(
+            respuesta.data["graficas"]["horarios_asistencia"],
+            [{"hora": "07:00", "total": 3}],
+        )
+        # Antes eran más de 100 consultas (una por mes y por día).
+        self.assertLess(len(consultas), 60)
+
+    def test_alertas_se_marcan_como_leidas(self):
+        alerta = Alerta.objects.create(
+            tipo=Alerta.Tipo.PAGOS_PENDIENTES,
+            titulo="Pago pendiente",
+            mensaje="Carla tiene un pago pendiente.",
+            cliente=self.cliente,
+        )
+        Alerta.objects.create(
+            tipo=Alerta.Tipo.GASTOS_ALTOS,
+            prioridad=Alerta.Prioridad.ALTA,
+            titulo="Gastos altos",
+            mensaje="Los gastos superan los ingresos.",
+        )
+
+        estadisticas = self.client.get("/api/v1/alertas/estadisticas/")
+        self.assertEqual(estadisticas.status_code, 200, estadisticas.data)
+        self.assertEqual(estadisticas.data["no_leidas"], 2)
+
+        una = self.client.post(f"/api/v1/alertas/{alerta.pk}/marcar-leida/")
+        self.assertEqual(una.status_code, 200, una.data)
+        alerta.refresh_from_db()
+        self.assertTrue(alerta.leida)
+        self.assertEqual(alerta.leida_por, self.admin)
+
+        todas = self.client.post("/api/v1/alertas/marcar-todas-leidas/")
+        self.assertEqual(todas.status_code, 200, todas.data)
+        self.assertEqual(todas.data["cantidad"], 1)
+        self.assertFalse(Alerta.objects.filter(leida=False).exists())
+        self.assertFalse(Alerta.objects.exclude(leida_por=self.admin).exists())
+
+    def test_dashboard_consolida_ingresos_gastos_y_membresias(self):
+        self._pago("80000")
+        self._pago("50000", estado=Pago.Estado.PENDIENTE)
+        self._gasto("30000")
+        self._membresia(self.hoy + timedelta(days=20))
+
+        respuesta = self.client.get("/api/v1/dashboard/")
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        financieras = respuesta.data["metricas_financieras"]
+        self.assertEqual(financieras["ingresos"]["mes"], 80000.0)
+        self.assertEqual(financieras["ingresos"]["pendientes_mes"], 50000.0)
+        self.assertEqual(financieras["gastos"]["mes"], 30000.0)
+        self.assertEqual(financieras["ganancia_neta"]["mes"], 50000.0)
+
+        clientes = respuesta.data["metricas_clientes"]
+        self.assertEqual(clientes["total_registrados"], 1)
+        self.assertEqual(clientes["activos"], 1)
+        self.assertEqual(clientes["inactivos"], 0)
+        self.assertEqual(respuesta.data["metricas_membresias"]["activas"], 1)
+
+        graficas = respuesta.data["graficas"]
+        self.assertEqual(len(graficas["ingresos_vs_gastos"]), 12)
+        self.assertEqual(len(graficas["asistencias_por_dia"]), 30)
+        mes_actual = graficas["ingresos_vs_gastos"][-1]
+        self.assertEqual(mes_actual["mes"], self.hoy.strftime("%Y-%m"))
+        self.assertEqual(mes_actual["ingresos"], 80000.0)
+        self.assertEqual(mes_actual["gastos"], 30000.0)
+        self.assertEqual(mes_actual["ganancia"], 50000.0)
+
+    def test_dashboard_cuenta_membresias_vencidas_y_sin_renovar(self):
+        # Se creó vigente y venció después, sin que nadie la volviera a guardar.
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+        Membresia.objects.filter(pk=membresia.pk).update(
+            fecha_inicio=self.hoy - timedelta(days=40),
+            fecha_fin=self.hoy - timedelta(days=5),
+        )
+
+        respuesta = self.client.get("/api/v1/dashboard/")
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        clientes = respuesta.data["metricas_clientes"]
+        self.assertEqual(clientes["membresias_vencidas"], 1)
+        self.assertEqual(clientes["sin_renovar"], 1)
+        self.assertEqual(clientes["activos"], 0)
+        self.assertEqual(clientes["inactivos"], 1)
+        self.assertEqual(respuesta.data["metricas_membresias"]["vencidas"], 1)
+
+    def test_dashboard_no_cuenta_como_vencido_al_cliente_que_renovo(self):
+        self._membresia(self.hoy - timedelta(days=5))
+        self._membresia(self.hoy + timedelta(days=25))
+
+        respuesta = self.client.get("/api/v1/dashboard/")
+
+        clientes = respuesta.data["metricas_clientes"]
+        self.assertEqual(clientes["membresias_vencidas"], 0)
+        self.assertEqual(clientes["sin_renovar"], 0)
+        self.assertEqual(clientes["activos"], 1)
+
+    def test_cliente_no_accede_a_finanzas_del_gimnasio(self):
+        self._gasto("30000")
+        self._autenticar(self.cliente.usuario)
+
+        self.assertEqual(self.client.get("/api/v1/dashboard/").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/gastos/").status_code, 403)
+        self.assertEqual(
+            self.client.get("/api/v1/gastos/estadisticas/").status_code, 403
+        )
+
+
+class EscenarioDosGimnasios(APITestCase):
+    """Dos gimnasios con datos propios; las pruebas actúan como admin de A.
+
+    El gimnasio A es el principal que crea la migración; el B se crea en la
+    prueba como lo haría el personal de la plataforma.
+    """
+
+    CLAVE = "ClaveSegura-2026"
+
+    def setUp(self):
+        cache.clear()
+        self.gym_a = gimnasio_principal()
+        self.gym_b = Gimnasio.objects.create(nombre="Gimnasio Norte", codigo="norte")
+        rol_admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+        rol_cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+
+        self.admin_a = self._usuario(self.gym_a, rol_admin, "admin.a@example.com")
+        self.admin_b = self._usuario(self.gym_b, rol_admin, "admin.b@example.com")
+        self.cliente_a = Cliente.objects.create(
+            usuario=self._usuario(self.gym_a, rol_cliente, "cliente.a@example.com")
+        )
+        self.cliente_b = Cliente.objects.create(
+            usuario=self._usuario(self.gym_b, rol_cliente, "cliente.b@example.com")
+        )
+        self.metodo_a = MetodoPago.objects.get(gimnasio=self.gym_a, nombre="Efectivo")
+        self.metodo_b = MetodoPago.objects.get(gimnasio=self.gym_b, nombre="Efectivo")
+        self.categoria_b = CategoriaGasto.objects.get(gimnasio=self.gym_b, nombre="Arriendo")
+        hoy = timezone.localdate()
+
+        self.pago_a = Pago.objects.create(
+            cliente=self.cliente_a, concepto=Pago.Concepto.MATRICULA, valor=Decimal("10000"),
+            metodo_pago=self.metodo_a, registrado_por=self.admin_a,
+        )
+        self.pago_b = Pago.objects.create(
+            cliente=self.cliente_b, concepto=Pago.Concepto.MATRICULA, valor=Decimal("999000"),
+            metodo_pago=self.metodo_b, registrado_por=self.admin_b,
+        )
+        self.gasto_b = Gasto.objects.create(
+            descripcion="Arriendo secreto del Norte", categoria=self.categoria_b,
+            valor=Decimal("777000"), fecha=hoy, metodo_pago=self.metodo_b,
+            registrado_por=self.admin_b,
+        )
+        self.membresia_b = Membresia.objects.create(
+            cliente=self.cliente_b, nombre="Mensual Norte", precio=Decimal("90000"),
+            fecha_inicio=hoy, fecha_fin=hoy + timedelta(days=30), registrado_por=self.admin_b,
+        )
+        self.asistencia_b = Asistencia.objects.create(
+            cliente=self.cliente_b, entrada_at=timezone.now() - timedelta(hours=1)
+        )
+        self.alerta_b = Alerta.objects.create(
+            tipo=Alerta.Tipo.GASTOS_ALTOS, titulo="Alerta del Norte", mensaje="Solo para B.",
+            gasto=self.gasto_b,
+        )
+        self.ejercicio_b = Ejercicio.objects.create(gimnasio=self.gym_b, nombre="Sentadilla Norte")
+        self._autenticar(self.admin_a)
+
+    def _usuario(self, gimnasio, rol, correo):
+        usuario = Usuario(gimnasio=gimnasio, rol=rol, nombre=correo.split("@")[0], correo=correo)
+        usuario.set_password(self.CLAVE)
+        usuario.save()
+        return usuario
+
+    def _autenticar(self, usuario):
+        self.client.credentials()
+        respuesta = self.client.post(
+            "/api/v1/login/", {"correo": usuario.correo, "contrasena": self.CLAVE}, format="json"
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {respuesta.data['token']}")
+        return respuesta
+
+    def _ids(self, ruta):
+        respuesta = self.client.get(ruta, {"page_size": 200})
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        return {fila["id"] if "id" in fila else fila["usuario"] for fila in respuesta.data["results"]}
+
+
+class AislamientoGimnasiosTests(EscenarioDosGimnasios):
+    """Un gimnasio nunca ve ni modifica datos de otro (SaaS multi-tenant).
+
+    Todas las solicitudes se hacen como administrador de A contra registros de B.
+    """
+
+    def test_cada_modelo_declara_como_se_aisla(self):
+        from django.apps import apps
+
+        from .tenancy import ruta_gimnasio
+
+        for modelo in apps.get_app_config("gym").get_models():
+            with self.subTest(modelo=modelo.__name__):
+                ruta_gimnasio(modelo)
+
+    def test_los_datos_heredan_el_gimnasio_de_su_cliente(self):
+        self.assertEqual(self.pago_b.gimnasio, self.gym_b)
+        self.assertEqual(self.membresia_b.gimnasio, self.gym_b)
+        self.assertEqual(self.asistencia_b.gimnasio, self.gym_b)
+        self.assertEqual(self.alerta_b.gimnasio, self.gym_b)
+
+    def test_listados_solo_muestran_el_propio_gimnasio(self):
+        casos = {
+            "/api/v1/usuarios/": {self.admin_b.pk, self.cliente_b.pk},
+            "/api/v1/clientes/": {self.cliente_b.pk},
+            "/api/v1/pagos/": {self.pago_b.pk},
+            "/api/v1/gastos/": {self.gasto_b.pk},
+            "/api/v1/membresias/": {self.membresia_b.pk},
+            "/api/v1/asistencias/": {self.asistencia_b.pk},
+            "/api/v1/alertas/": {self.alerta_b.pk},
+            "/api/v1/ejercicios/": {self.ejercicio_b.pk},
+            "/api/v1/metodos-pago/": {self.metodo_b.pk},
+            "/api/v1/categorias-gasto/": {self.categoria_b.pk},
+        }
+        for ruta, ajenos in casos.items():
+            with self.subTest(ruta=ruta):
+                visibles = self._ids(ruta)
+                self.assertFalse(visibles & ajenos, f"{ruta} expone datos de otro gimnasio")
+        self.assertIn(self.pago_a.pk, self._ids("/api/v1/pagos/"))
+
+    def test_detalle_y_escritura_sobre_otro_gimnasio_responden_404(self):
+        casos = [
+            ("get", f"/api/v1/pagos/{self.pago_b.pk}/", None),
+            ("get", f"/api/v1/gastos/{self.gasto_b.pk}/", None),
+            ("get", f"/api/v1/membresias/{self.membresia_b.pk}/", None),
+            ("get", f"/api/v1/clientes/{self.cliente_b.pk}/", None),
+            ("get", f"/api/v1/usuarios/{self.admin_b.pk}/", None),
+            ("get", f"/api/v1/asistencias/{self.asistencia_b.pk}/", None),
+            ("patch", f"/api/v1/gastos/{self.gasto_b.pk}/", {"valor": "1"}),
+            ("patch", f"/api/v1/usuarios/{self.admin_b.pk}/", {"nombre": "Hackeado"}),
+            ("delete", f"/api/v1/pagos/{self.pago_b.pk}/", None),
+            ("post", f"/api/v1/membresias/{self.membresia_b.pk}/renovar/", {"meses": 1}),
+            ("post", f"/api/v1/membresias/{self.membresia_b.pk}/congelar/", {"dias": 5}),
+            ("post", f"/api/v1/alertas/{self.alerta_b.pk}/marcar-leida/", {}),
+        ]
+        for metodo, ruta, datos in casos:
+            with self.subTest(metodo=metodo, ruta=ruta):
+                respuesta = getattr(self.client, metodo)(ruta, datos, format="json")
+                self.assertEqual(respuesta.status_code, 404, respuesta.data)
+        self.gasto_b.refresh_from_db()
+        self.pago_b.refresh_from_db()
+        self.assertEqual(self.gasto_b.valor, Decimal("777000"))
+        self.assertIsNone(self.pago_b.deleted_at)
+        self.assertEqual(Usuario.objects.get(pk=self.admin_b.pk).nombre, "admin.b")
+
+    def test_restaurar_un_registro_de_otro_gimnasio_responde_404(self):
+        self.gasto_b.soft_delete()
+        respuesta = self.client.post(f"/api/v1/gastos/{self.gasto_b.pk}/restaurar/")
+        self.assertEqual(respuesta.status_code, 404, respuesta.data)
+        self.gasto_b.refresh_from_db()
+        self.assertIsNotNone(self.gasto_b.deleted_at)
+
+    def test_no_se_pueden_referenciar_registros_de_otro_gimnasio(self):
+        hoy = timezone.localdate().isoformat()
+        casos = [
+            ("/api/v1/pagos/", {"cliente": self.cliente_b.pk, "concepto": "matricula", "valor": "5000", "metodo_pago": self.metodo_a.pk}, "cliente"),
+            ("/api/v1/pagos/", {"cliente": self.cliente_a.pk, "concepto": "matricula", "valor": "5000", "metodo_pago": self.metodo_b.pk}, "metodo_pago"),
+            ("/api/v1/pagos/", {"cliente": self.cliente_a.pk, "membresia": self.membresia_b.pk, "concepto": "membresia", "valor": "5000", "metodo_pago": self.metodo_a.pk}, "membresia"),
+            ("/api/v1/gastos/", {"descripcion": "x", "categoria": self.categoria_b.pk, "valor": "5000", "fecha": hoy, "metodo_pago": self.metodo_a.pk}, "categoria"),
+            ("/api/v1/membresias/", {"cliente": self.cliente_b.pk, "nombre": "x", "precio": "1", "fecha_inicio": hoy, "fecha_fin": hoy}, "cliente"),
+            ("/api/v1/asistencias/", {"cliente": self.cliente_b.pk, "entrada_at": timezone.now().isoformat()}, "cliente"),
+        ]
+        antes = (Pago.objects.count(), Gasto.objects.count(), Membresia.objects.count(), Asistencia.objects.count())
+        for ruta, datos, campo in casos:
+            with self.subTest(ruta=ruta, campo=campo):
+                respuesta = self.client.post(ruta, datos, format="json")
+                self.assertEqual(respuesta.status_code, 400, respuesta.data)
+                self.assertIn(campo, respuesta.data["error"]["detalles"])
+        despues = (Pago.objects.count(), Gasto.objects.count(), Membresia.objects.count(), Asistencia.objects.count())
+        self.assertEqual(antes, despues)
+
+    def test_el_gimnasio_de_un_registro_nuevo_sale_de_la_sesion(self):
+        respuesta = self.client.post(
+            "/api/v1/gastos/",
+            {
+                "descripcion": "Intento de escribir en B",
+                "categoria": CategoriaGasto.objects.get(gimnasio=self.gym_a, nombre="Arriendo").pk,
+                "valor": "5000",
+                "fecha": timezone.localdate().isoformat(),
+                "metodo_pago": self.metodo_a.pk,
+                "gimnasio": self.gym_b.pk,
+                "gym_id": self.gym_b.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(Gasto.objects.get(pk=respuesta.data["id"]).gimnasio, self.gym_a)
+
+        usuario = self.client.post(
+            "/api/v1/usuarios/",
+            {
+                "rol": Rol.objects.get(nombre=Rol.Nombre.RECEPCIONISTA).pk,
+                "nombre": "Nueva recepción",
+                "correo": "recepcion.nueva@example.com",
+                "contrasena": "UnaClaveSegura123",
+                "gimnasio": self.gym_b.pk,
+                "perfil": {},
+            },
+            format="json",
+        )
+        self.assertEqual(usuario.status_code, 201, usuario.data)
+        self.assertEqual(Usuario.objects.get(pk=usuario.data["id"]).gimnasio, self.gym_a)
+
+    def test_estadisticas_dashboard_y_exportacion_no_suman_otro_gimnasio(self):
+        estadisticas = self.client.get("/api/v1/pagos/estadisticas/")
+        self.assertEqual(Decimal(estadisticas.data["total_ingresos"]), Decimal("10000"))
+        gastos = self.client.get("/api/v1/gastos/estadisticas/")
+        self.assertEqual(Decimal(gastos.data["total_gastos"]), Decimal("0"))
+
+        dashboard = self.client.get("/api/v1/dashboard/")
+        self.assertEqual(dashboard.status_code, 200, dashboard.data)
+        financieras = dashboard.data["metricas_financieras"]
+        self.assertEqual(financieras["ingresos"]["mes"], 10000.0)
+        self.assertEqual(financieras["gastos"]["mes"], 0.0)
+        self.assertEqual(dashboard.data["metricas_clientes"]["total_registrados"], 1)
+        self.assertNotIn(
+            self.alerta_b.pk, [alerta["id"] for alerta in dashboard.data["alertas_recientes"]]
+        )
+
+        exportado = self.client.get("/api/v1/gastos/exportar/").content.decode()
+        self.assertNotIn("Arriendo secreto del Norte", exportado)
+        conteos = self.client.get("/api/v1/conteos/").data
+        self.assertEqual(conteos.get("pagos"), 1)
+
+    def test_auditoria_y_resumen_no_muestran_otro_gimnasio(self):
+        self._autenticar(self.admin_b)
+        self.client.patch(f"/api/v1/gastos/{self.gasto_b.pk}/", {"observaciones": "ok"}, format="json")
+        self.assertTrue(EventoAuditoria.objects.filter(actor=self.admin_b).exists())
+
+        self._autenticar(self.admin_a)
+        eventos = self.client.get("/api/v1/auditoria/", {"page_size": 200}).data["results"]
+        self.assertFalse([e for e in eventos if e.get("actor") == self.admin_b.pk])
+        resumen = self.client.get("/api/v1/resumen/").data
+        self.assertFalse(
+            [e for e in resumen["actividad_reciente"] if e.get("actor") == self.admin_b.pk]
+        )
+
+    def test_la_matriz_de_permisos_es_de_cada_gimnasio(self):
+        rol_cliente = Rol.objects.get(nombre=Rol.Nombre.CLIENTE)
+        antes_b = set(self.cliente_b.usuario.permisos_efectivos())
+
+        respuesta = self.client.put(
+            f"/api/v1/roles/{rol_cliente.pk}/permisos/",
+            {"permisos": ["gastos:view"]},
+            format="json",
+        )
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertTrue(self.cliente_a.usuario.tiene_permiso("gastos:view"))
+        self.assertFalse(self.cliente_b.usuario.tiene_permiso("gastos:view"))
+        self.assertEqual(set(self.cliente_b.usuario.permisos_efectivos()), antes_b)
+        # Aun con el permiso, el cliente de A no ve gastos de nadie (alcance).
+        self.assertFalse(Gasto.objects.filter(gimnasio=self.gym_a).exists())
+
+    def test_roles_personalizados_son_del_gimnasio_y_los_del_sistema_compartidos(self):
+        creado = self.client.post("/api/v1/roles/", {"nombre": "caja-a"}, format="json")
+        self.assertEqual(creado.status_code, 201, creado.data)
+        self.assertFalse(creado.data["es_del_sistema"])
+        self.assertEqual(Rol.objects.get(pk=creado.data["id"]).gimnasio, self.gym_a)
+
+        rol_entrenador = Rol.objects.get(nombre=Rol.Nombre.ENTRENADOR)
+        self.assertEqual(
+            self.client.patch(
+                f"/api/v1/roles/{rol_entrenador.pk}/", {"is_active": False}, format="json"
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.delete(f"/api/v1/roles/{rol_entrenador.pk}/").status_code, 403
+        )
+        rol_entrenador.refresh_from_db()
+        self.assertTrue(rol_entrenador.is_active)
+
+        self._autenticar(self.admin_b)
+        self.assertEqual(self.client.get(f"/api/v1/roles/{creado.data['id']}/").status_code, 404)
+        self.assertNotIn(creado.data["id"], self._ids("/api/v1/roles/"))
+        asignar = self.client.post(
+            "/api/v1/usuarios-roles/",
+            {"usuario": self.cliente_b.pk, "rol": creado.data["id"]},
+            format="json",
+        )
+        self.assertEqual(asignar.status_code, 400, asignar.data)
+
+    def test_el_ultimo_administrador_se_cuenta_por_gimnasio(self):
+        from .serializers import existe_otro_administrador_activo
+
+        self.assertFalse(existe_otro_administrador_activo(self.admin_b))
+        self._autenticar(self.admin_b)
+        respuesta = self.client.put(
+            f"/api/v1/usuarios/{self.admin_b.pk}/roles/",
+            {"roles": [], "rol_principal": Rol.objects.get(nombre=Rol.Nombre.CLIENTE).pk},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 400, respuesta.data)
+
+    def test_un_gimnasio_inactivo_no_inicia_sesion_y_pierde_sus_sesiones(self):
+        respuesta_b = self._autenticar(self.admin_b)
+        token_b = respuesta_b.data["token"]
+        self.gym_b.is_active = False
+        self.gym_b.save(update_fields=["is_active", "updated_at"])
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_b}")
+        self.assertEqual(self.client.get("/api/v1/me/").status_code, 401)
+        self.client.credentials()
+        login = self.client.post(
+            "/api/v1/login/", {"correo": self.admin_b.correo, "contrasena": self.CLAVE}, format="json"
+        )
+        self.assertEqual(login.status_code, 401)
+
+    def test_el_registro_publico_usa_el_codigo_del_gimnasio(self):
+        self.client.credentials()
+        datos = {"nombre": "Nueva Persona", "contrasena": "UnaClaveSegura123"}
+
+        sin_codigo = self.client.post(
+            "/api/v1/registro/", {**datos, "correo": "sin.codigo@example.com"}, format="json"
+        )
+        self.assertEqual(sin_codigo.status_code, 400, sin_codigo.data)
+        self.assertIn("gimnasio", sin_codigo.data["error"]["detalles"])
+
+        invalido = self.client.post(
+            "/api/v1/registro/",
+            {**datos, "correo": "invalido@example.com", "gimnasio": "no-existe"},
+            format="json",
+        )
+        self.assertEqual(invalido.status_code, 400)
+
+        creado = self.client.post(
+            "/api/v1/registro/",
+            {**datos, "correo": "norte.nuevo@example.com", "gimnasio": "NORTE"},
+            format="json",
+        )
+        self.assertEqual(creado.status_code, 201, creado.data)
+        self.assertEqual(creado.data["usuario"]["gimnasio"]["codigo"], "norte")
+        self.assertEqual(Usuario.objects.get(correo="norte.nuevo@example.com").gimnasio, self.gym_b)
+
+    def test_un_gimnasio_nuevo_queda_listo_para_operar(self):
+        rol_admin = Rol.objects.get(nombre=Rol.Nombre.ADMINISTRADOR)
+        self.assertEqual(MetodoPago.objects.filter(gimnasio=self.gym_b).count(), 7)
+        self.assertEqual(CategoriaGasto.objects.filter(gimnasio=self.gym_b).count(), 9)
+        self.assertEqual(
+            RolPermiso.objects.filter(rol=rol_admin, gimnasio=self.gym_b).count(),
+            RolPermiso.objects.filter(rol=rol_admin, gimnasio=None).count(),
+        )
+        self.assertTrue(self.admin_b.tiene_permiso("gastos:create"))
+        me = self._autenticar(self.admin_b).data["usuario"]
+        self.assertEqual(me["gimnasio"]["nombre"], "Gimnasio Norte")
+
+    def test_la_plataforma_ve_todos_los_gimnasios(self):
+        plataforma = APIClient()
+        get_user_model().objects.create_superuser(
+            username="plataforma", email="plataforma@example.com", password="ClavePlataforma123"
+        )
+        self.assertTrue(plataforma.login(username="plataforma", password="ClavePlataforma123"))
+        ids = {
+            fila["id"]
+            for fila in plataforma.get("/api/v1/pagos/", {"page_size": 200}).data["results"]
+        }
+        self.assertEqual(ids, {self.pago_a.pk, self.pago_b.pk})
+
+
+class CentroAlertasYConfiguracionTests(APITestCase):
+    """Configuración por gimnasio y reglas del centro de alertas."""
+
+    CLAVE = "ClaveSegura-2026"
+
+    def setUp(self):
+        cache.clear()
+        self.gimnasio = gimnasio_principal()
+        self.otro = Gimnasio.objects.create(nombre="Otro Gimnasio", codigo="otro")
+        self.admin = self._usuario(Rol.Nombre.ADMINISTRADOR, "admin.alertas@example.com")
+        self.usuario_cliente = self._usuario(Rol.Nombre.CLIENTE, "cliente.alertas@example.com")
+        self.cliente = Cliente.objects.create(usuario=self.usuario_cliente)
+        self.metodo = MetodoPago.objects.get(gimnasio=self.gimnasio, nombre="Efectivo")
+        self.categoria = CategoriaGasto.objects.get(gimnasio=self.gimnasio, nombre="Arriendo")
+        self.hoy = timezone.localdate()
+        self._autenticar(self.admin)
+
+    def _usuario(self, rol, correo, gimnasio=None):
+        usuario = Usuario(
+            gimnasio=gimnasio or self.gimnasio,
+            rol=Rol.objects.get(nombre=rol),
+            nombre=correo.split("@")[0],
+            correo=correo,
+        )
+        usuario.set_password(self.CLAVE)
+        usuario.save()
+        return usuario
+
+    def _autenticar(self, usuario):
+        self.client.credentials()
+        respuesta = self.client.post(
+            "/api/v1/login/", {"correo": usuario.correo, "contrasena": self.CLAVE}, format="json"
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {respuesta.data['token']}")
+
+    def _alertas(self, tipo):
+        return Alerta.objects.filter(gimnasio=self.gimnasio, tipo=tipo)
+
+    def test_configuracion_del_gimnasio_propio(self):
+        respuesta = self.client.get("/api/v1/gimnasio/")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.data["codigo"], "principal")
+
+        cambio = self.client.patch(
+            "/api/v1/gimnasio/",
+            {
+                "nombre": "Gym Centro",
+                "dias_inactividad_alerta": 10,
+                "limite_gastos_mensual": "2000000",
+                "porcentaje_caida_ingresos": 25,
+                "codigo": "robado",
+                "is_active": False,
+            },
+            format="json",
+        )
+        self.assertEqual(cambio.status_code, 200, cambio.data)
+        self.gimnasio.refresh_from_db()
+        self.assertEqual(self.gimnasio.nombre, "Gym Centro")
+        self.assertEqual(self.gimnasio.dias_inactividad_alerta, 10)
+        self.assertEqual(self.gimnasio.codigo, "principal")
+        self.assertTrue(self.gimnasio.is_active)
+        self.otro.refresh_from_db()
+        self.assertEqual(self.otro.nombre, "Otro Gimnasio")
+        self.assertTrue(
+            EventoAuditoria.objects.filter(recurso="gimnasio", accion="actualizar-configuracion").exists()
+        )
+
+        for datos in ({"dias_inactividad_alerta": 0}, {"porcentaje_caida_ingresos": 150}, {"limite_gastos_mensual": "-5"}):
+            with self.subTest(datos=datos):
+                self.assertEqual(self.client.patch("/api/v1/gimnasio/", datos, format="json").status_code, 400)
+
+        self._autenticar(self.usuario_cliente)
+        self.assertEqual(self.client.get("/api/v1/gimnasio/").status_code, 200)
+        self.assertEqual(
+            self.client.patch("/api/v1/gimnasio/", {"nombre": "x"}, format="json").status_code, 403
+        )
+
+    def test_alerta_de_cliente_que_dejo_de_asistir(self):
+        from .alertas import generar_alertas
+
+        Membresia.objects.create(
+            cliente=self.cliente, nombre="Mensual", precio=Decimal("80000"),
+            fecha_inicio=self.hoy - timedelta(days=5), fecha_fin=self.hoy + timedelta(days=25),
+            registrado_por=self.admin,
+        )
+        entrada = timezone.now() - timedelta(days=20)
+        Asistencia.objects.create(cliente=self.cliente, entrada_at=entrada, salida_at=entrada + timedelta(hours=1))
+
+        self.assertEqual(generar_alertas(self.gimnasio)["clientes_inactivos"], 1)
+        self.assertEqual(generar_alertas(self.gimnasio)["clientes_inactivos"], 0)
+        alerta = self._alertas(Alerta.Tipo.CLIENTE_INACTIVO).get()
+        self.assertEqual(alerta.cliente, self.cliente)
+
+        # Con un umbral mayor que la ausencia no se alerta.
+        Alerta.objects.all().delete()
+        self.gimnasio.dias_inactividad_alerta = 30
+        self.gimnasio.save()
+        self.assertEqual(generar_alertas(self.gimnasio)["clientes_inactivos"], 0)
+
+    def test_alerta_de_ingresos_bajos_frente_al_mes_anterior(self):
+        from .alertas import generar_alertas
+
+        inicio_mes = self.hoy.replace(day=1)
+        mes_cerrado = (inicio_mes - timedelta(days=1)).replace(day=15)
+        mes_previo = (mes_cerrado.replace(day=1) - timedelta(days=1)).replace(day=15)
+        for fecha, valor in ((mes_previo, "1000000"), (mes_cerrado, "400000")):
+            Pago.objects.create(
+                cliente=self.cliente, concepto=Pago.Concepto.MEMBRESIA, valor=Decimal(valor),
+                metodo_pago=self.metodo, registrado_por=self.admin,
+                fecha_pago=timezone.make_aware(datetime.combine(fecha, time(10))),
+            )
+
+        self.assertEqual(generar_alertas(self.gimnasio)["ingresos_bajos"], 1)
+        self.assertEqual(generar_alertas(self.gimnasio)["ingresos_bajos"], 0)
+        alerta = self._alertas(Alerta.Tipo.INGRESOS_BAJOS).get()
+        self.assertEqual(alerta.datos_adicionales["caida_porcentaje"], 60.0)
+        self.assertIn("$ 400.000", alerta.mensaje)
+
+    def test_alerta_de_gastos_sobre_el_limite_y_de_gasto_nuevo(self):
+        self.gimnasio.limite_gastos_mensual = Decimal("500000")
+        self.gimnasio.save()
+
+        respuesta = self.client.post(
+            "/api/v1/gastos/",
+            {
+                "descripcion": "Arriendo de noviembre",
+                "categoria": self.categoria.pk,
+                "valor": "600000",
+                "fecha": self.hoy.isoformat(),
+                "metodo_pago": self.metodo.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        nuevo = self._alertas(Alerta.Tipo.NUEVO_GASTO).get()
+        self.assertEqual(nuevo.gasto_id, respuesta.data["id"])
+
+        alertas = self.client.get("/api/v1/alertas/").data["results"]
+        tipos = [alerta["tipo"] for alerta in alertas]
+        self.assertIn(Alerta.Tipo.GASTOS_ALTOS, tipos)
+        # La crítica va primero.
+        self.assertEqual(alertas[0]["tipo"], Alerta.Tipo.GASTOS_ALTOS)
+        self.client.get("/api/v1/alertas/")
+        self.assertEqual(self._alertas(Alerta.Tipo.GASTOS_ALTOS).count(), 1)
+
+    def test_alerta_de_pago_pendiente_se_cierra_al_completarlo(self):
+        from .alertas import generar_alertas
+
+        pago = Pago.objects.create(
+            cliente=self.cliente, concepto=Pago.Concepto.MEMBRESIA, valor=Decimal("80000"),
+            metodo_pago=self.metodo, registrado_por=self.admin, estado=Pago.Estado.PENDIENTE,
+        )
+        self.assertEqual(generar_alertas(self.gimnasio)["pagos_pendientes"], 1)
+        self.assertEqual(generar_alertas(self.gimnasio)["pagos_pendientes"], 0)
+
+        pago.estado = Pago.Estado.COMPLETADO
+        pago.save()
+        generar_alertas(self.gimnasio)
+        self.assertTrue(self._alertas(Alerta.Tipo.PAGOS_PENDIENTES).get().leida)
+
+    def test_las_alertas_se_generan_solo_para_el_propio_gimnasio(self):
+        cliente_otro = Cliente.objects.create(
+            usuario=self._usuario(Rol.Nombre.CLIENTE, "cliente.otro@example.com", gimnasio=self.otro)
+        )
+        Pago.objects.create(
+            cliente=cliente_otro, concepto=Pago.Concepto.MATRICULA, valor=Decimal("1"),
+            metodo_pago=MetodoPago.objects.get(gimnasio=self.otro, nombre="Efectivo"),
+            registrado_por=self._usuario(Rol.Nombre.ADMINISTRADOR, "admin.otro@example.com", gimnasio=self.otro),
+            estado=Pago.Estado.PENDIENTE,
+        )
+        self.client.get("/api/v1/alertas/")
+        self.assertFalse(Alerta.objects.filter(gimnasio=self.otro).exists())
+
+    def test_comando_generar_alertas_recorre_los_gimnasios(self):
+        Pago.objects.create(
+            cliente=self.cliente, concepto=Pago.Concepto.MEMBRESIA, valor=Decimal("1000"),
+            metodo_pago=self.metodo, registrado_por=self.admin, estado=Pago.Estado.PENDIENTE,
+        )
+        salida = StringIO()
+        call_command("generar_alertas", stdout=salida)
+        self.assertIn("pagos_pendientes: 1", salida.getvalue())
+        self.assertIn("Otro Gimnasio", salida.getvalue())
+
+
+class ReportesTests(EscenarioDosGimnasios):
+    """Reportes Excel/PDF con datos reales y aislados por gimnasio."""
+
+    TIPOS = ("financiero", "ingresos", "gastos", "asistencia", "clientes", "membresias", "crecimiento")
+
+    def setUp(self):
+        super().setUp()
+        hoy = timezone.localdate()
+        self.rango = {"fecha_desde": hoy.replace(day=1).isoformat(), "fecha_hasta": hoy.isoformat()}
+        categoria_a = CategoriaGasto.objects.get(gimnasio=self.gym_a, nombre="Arriendo")
+        Gasto.objects.create(
+            descripcion="Arriendo sede A", categoria=categoria_a, valor=Decimal("4000"),
+            fecha=hoy, metodo_pago=self.metodo_a, registrado_por=self.admin_a,
+        )
+        Gasto.objects.create(
+            descripcion="Gasto anulado A", categoria=categoria_a, valor=Decimal("500000"),
+            fecha=hoy, metodo_pago=self.metodo_a, registrado_por=self.admin_a,
+            estado=Gasto.Estado.CANCELADO,
+        )
+        Asistencia.objects.create(cliente=self.cliente_a, entrada_at=timezone.now() - timedelta(minutes=30))
+
+    def _descargar(self, tipo, formato, **extra):
+        return self.client.get(f"/api/v1/reportes/{tipo}/", {**self.rango, "formato": formato, **extra})
+
+    def _libro(self, respuesta):
+        from openpyxl import load_workbook
+
+        return load_workbook(BytesIO(respuesta.content))
+
+    def _textos(self, libro):
+        return [
+            str(celda)
+            for hoja in libro.worksheets
+            for fila in hoja.iter_rows(values_only=True)
+            for celda in fila
+            if celda is not None
+        ]
+
+    def test_todos_los_reportes_se_generan_en_excel_y_pdf(self):
+        for tipo in self.TIPOS:
+            excel = self._descargar(tipo, "xlsx")
+            self.assertEqual(excel.status_code, 200, tipo)
+            self.assertEqual(
+                excel["Content-Type"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            self.assertIn(f"reporte_{tipo}_", excel["Content-Disposition"])
+            self.assertGreater(len(self._libro(excel).worksheets), 1, tipo)
+
+            pdf = self._descargar(tipo, "pdf")
+            self.assertEqual(pdf.status_code, 200, tipo)
+            self.assertEqual(pdf["Content-Type"], "application/pdf")
+            self.assertTrue(pdf.content.startswith(b"%PDF"), tipo)
+        self.assertEqual(
+            EventoAuditoria.objects.filter(accion="exportar-reporte", actor=self.admin_a).count(),
+            len(self.TIPOS) * 2,
+        )
+
+    def test_reporte_financiero_usa_cifras_reales_sin_anulados(self):
+        libro = self._libro(self._descargar("financiero", "xlsx"))
+        resumen = {
+            fila[0]: fila[1]
+            for fila in libro["Resumen"].iter_rows(min_row=8, values_only=True)
+            if fila[0]
+        }
+        self.assertEqual(resumen["Ingresos completados"], 10000)
+        self.assertEqual(resumen["Gastos"], 4000)
+        self.assertEqual(resumen["Ganancia neta"], 6000)
+
+    def test_reportes_no_incluyen_datos_de_otro_gimnasio(self):
+        for tipo in self.TIPOS:
+            textos = " ".join(self._textos(self._libro(self._descargar(tipo, "xlsx"))))
+            self.assertNotIn("Gimnasio Norte", textos, tipo)
+            self.assertNotIn("Arriendo secreto del Norte", textos, tipo)
+            self.assertNotIn("cliente.b", textos, tipo)
+            self.assertNotIn("999000", textos, tipo)
+            self.assertNotIn("777000", textos, tipo)
+
+    def test_el_gimnasio_no_se_elige_por_parametro(self):
+        # Un administrador de A que pide el gimnasio B por parámetro sigue
+        # recibiendo solo su propio gimnasio.
+        textos = " ".join(self._textos(self._libro(self._descargar("ingresos", "xlsx", gimnasio="norte"))))
+        self.assertIn(self.gym_a.nombre, textos)
+        self.assertNotIn("Gimnasio Norte", textos)
+        self.assertNotIn("999000", textos)
+
+    def test_cliente_y_anonimo_no_descargan_reportes(self):
+        self._autenticar(self.cliente_a.usuario)
+        self.assertEqual(self._descargar("financiero", "xlsx").status_code, 403)
+        self.client.credentials()
+        self.assertEqual(self._descargar("financiero", "pdf").status_code, 401)
+
+    def test_parametros_invalidos_responden_400_o_404(self):
+        self.assertEqual(self._descargar("financiero", "docx").status_code, 400)
+        self.assertEqual(self._descargar("inventado", "xlsx").status_code, 404)
+        respuesta = self.client.get(
+            "/api/v1/reportes/ingresos/",
+            {"fecha_desde": "2026-05-10", "fecha_hasta": "2026-05-01"},
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        respuesta = self.client.get("/api/v1/reportes/ingresos/", {"fecha_desde": "10/05/2026"})
+        self.assertEqual(respuesta.status_code, 400)
+
+
+class ErroresPorCampoAltaUsuarioTests(EscenarioDosGimnasios):
+    """El alta de usuarios devuelve cada error en su campo y en español."""
+
+    def _alta(self, **cambios):
+        datos = {
+            "rol": Rol.objects.get(nombre="cliente").id,
+            "nombre": "Angie Cantillo",
+            "correo": "angie.nueva@example.com",
+            "telefono": "3015478525",
+            "contrasena": "Fuerte2026!",
+            "is_active": True,
+            "perfil": {
+                "tipo_documento": "CC",
+                "numero_documento": "1548652874",
+                "fecha_nacimiento": "2008-01-26",
+                "peso_kg": "52",
+                "estatura_cm": "171",
+            },
+        }
+        perfil = cambios.pop("perfil", None)
+        datos.update(cambios)
+        if perfil is not None:
+            datos["perfil"] = perfil
+        return self.client.post("/api/v1/usuarios/", datos, format="json")
+
+    def test_alta_valida_crea_cliente(self):
+        respuesta = self._alta()
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(Usuario.objects.get(correo="angie.nueva@example.com").gimnasio, self.gym_a)
+
+    def test_contrasena_parecida_al_nombre_se_explica_en_su_campo(self):
+        respuesta = self._alta(contrasena="angie123")
+        self.assertEqual(respuesta.status_code, 400)
+        mensajes = " ".join(respuesta.data["error"]["detalles"]["contrasena"])
+        self.assertIn("al nombre", mensajes)
+        self.assertNotIn("first_name", mensajes)
+
+    def test_todos_los_errores_llegan_juntos(self):
+        respuesta = self._alta(correo=self.admin_a.correo, contrasena="12345678")
+        self.assertEqual(respuesta.status_code, 400)
+        detalles = respuesta.data["error"]["detalles"]
+        self.assertIn("correo", detalles)
+        self.assertIn("contrasena", detalles)
+
+    def test_correo_repetido_tiene_mensaje_claro(self):
+        respuesta = self._alta(correo=self.admin_a.correo)
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertEqual(
+            respuesta.data["error"]["detalles"]["correo"], ["Ya existe un usuario con este correo."]
+        )
+
+    def test_errores_del_perfil_quedan_en_su_campo(self):
+        self.assertEqual(self._alta().status_code, 201)
+        respuesta = self._alta(
+            correo="otra@example.com",
+            perfil={
+                "tipo_documento": "cc",
+                "numero_documento": "1548652874",
+                "fecha_nacimiento": "2999-01-01",
+                "peso_kg": "-5",
+            },
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        perfil = respuesta.data["error"]["detalles"]["perfil"]
+        self.assertIn("numero_documento", perfil)
+        self.assertIn("fecha_nacimiento", perfil)
+        self.assertIn("peso_kg", perfil)
+        self.assertNotIn("uq_cliente_documento_lower", str(perfil))
+
+    def test_administrador_elige_otro_rol_y_cliente_no_puede_crear(self):
+        entrenador = Rol.objects.get(nombre="entrenador")
+        respuesta = self._alta(correo="coach.nuevo@example.com", rol=entrenador.id, perfil={})
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(Usuario.objects.get(correo="coach.nuevo@example.com").rol, entrenador)
+
+        self._autenticar(self.cliente_a.usuario)
+        respuesta = self._alta(correo="intruso@example.com")
+        self.assertIn(respuesta.status_code, (400, 403))
+        self.assertFalse(Usuario.objects.filter(correo="intruso@example.com").exists())
+
+
+class PlanesEntrenamientoConMusculosTests(EscenarioDosGimnasios):
+    """Entrenador arma planes por día con músculos e imágenes; el cliente los ve."""
+
+    def setUp(self):
+        super().setUp()
+        self._carpeta = TemporaryDirectory()
+        self.addCleanup(self._carpeta.cleanup)
+        ajustes = self.settings(PRIVATE_MEDIA_ROOT=self._carpeta.name)
+        ajustes.enable()
+        self.addCleanup(ajustes.disable)
+
+        rol_entrenador = Rol.objects.get(nombre="entrenador")
+        self.entrenador = Entrenador.objects.create(
+            usuario=self._usuario(self.gym_a, rol_entrenador, "coach.a@example.com")
+        )
+        self.otro_entrenador = Entrenador.objects.create(
+            usuario=self._usuario(self.gym_a, rol_entrenador, "coach.otro@example.com")
+        )
+        hoy = timezone.localdate()
+        for entrenador in (self.entrenador, self.otro_entrenador):
+            ClienteEntrenador.objects.create(
+                cliente=self.cliente_a, entrenador=entrenador, fecha_inicio=hoy
+            )
+
+    def _png(self):
+        buffer = BytesIO()
+        Image.new("RGB", (8, 8), (40, 200, 90)).save(buffer, format="PNG")
+        return SimpleUploadedFile("press.png", buffer.getvalue(), content_type="image/png")
+
+    def _plan(self, **extra):
+        datos = {
+            "cliente": self.cliente_a.pk,
+            "entrenador": self.entrenador.pk,
+            "nombre": "Empuje-Tirón-Pierna",
+            "objetivo": "Hipertrofia",
+            "fecha_inicio": timezone.localdate().isoformat(),
+            "rutina": {
+                "lunes": {"titulo": "Empuje", "musculos": ["pecho", "hombros", "triceps"]},
+                "miercoles": {"titulo": "Pierna", "musculos": ["cuadriceps", "gluteos"]},
+            },
+            **extra,
+        }
+        return self.client.post("/api/v1/planes-entrenamiento/", datos, format="json")
+
+    def test_entrenador_crea_ejercicio_con_imagen_y_musculos(self):
+        self._autenticar(self.entrenador.usuario)
+        respuesta = self.client.post(
+            "/api/v1/ejercicios/",
+            {"nombre": "Press de banca", "grupo_muscular": "Pecho",
+             "musculos": '["pecho", "triceps"]', "imagen": self._png()},
+            format="multipart",
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["musculos"], ["pecho", "triceps"])
+        self.assertTrue(respuesta.data["imagen_url"].endswith("/imagen/"))
+        imagen = self.client.get(respuesta.data["imagen_url"])
+        self.assertEqual(imagen.status_code, 200)
+        self.assertEqual(imagen["Content-Type"], "image/png")
+
+        ejercicio = Ejercicio.objects.get(pk=respuesta.data["id"])
+        self.assertEqual(ejercicio.gimnasio, self.gym_a)
+        quitar = self.client.patch(
+            f"/api/v1/ejercicios/{ejercicio.pk}/", {"quitar_imagen": True}, format="json"
+        )
+        self.assertEqual(quitar.status_code, 200, quitar.data)
+        self.assertIsNone(quitar.data["imagen_url"])
+
+    def test_musculos_y_rutina_invalidos_se_rechazan(self):
+        self._autenticar(self.entrenador.usuario)
+        respuesta = self.client.post(
+            "/api/v1/ejercicios/", {"nombre": "Raro", "musculos": ["alas"]}, format="json"
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("musculos", respuesta.data["error"]["detalles"])
+        respuesta = self._plan(rutina={"festivo": {"musculos": ["pecho"]}})
+        self.assertEqual(respuesta.status_code, 400)
+        respuesta = self._plan(rutina={"lunes": {"musculos": ["alas"]}})
+        self.assertEqual(respuesta.status_code, 400)
+
+    def test_entrenador_crea_plan_por_dia_solo_a_su_nombre(self):
+        self._autenticar(self.entrenador.usuario)
+        respuesta = self._plan()
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["rutina"]["lunes"]["musculos"], ["pecho", "hombros", "triceps"])
+        ajeno = self._plan(entrenador=self.otro_entrenador.pk, nombre="Otro")
+        self.assertEqual(ajeno.status_code, 400)
+        self.assertIn("entrenador", ajeno.data["error"]["detalles"])
+
+    def test_plan_guarda_musculos_detallados_del_modelo_3d(self):
+        """Los músculos individuales del modelo anatómico se guardan tal cual y
+        los grupos antiguos siguen siendo válidos en la misma lista."""
+        from .models import GRUPOS_MUSCULARES, MUSCULOS, MUSCULOS_DETALLADOS
+
+        for codigo, (_nombre, grupo) in MUSCULOS_DETALLADOS.items():
+            self.assertIn(grupo, GRUPOS_MUSCULARES, codigo)
+            self.assertIn(codigo, MUSCULOS)
+        self._autenticar(self.entrenador.usuario)
+        musculos = ["pectoral_mayor", "deltoides_anterior", "triceps_braquial", "pecho"]
+        respuesta = self._plan(rutina={"lunes": {"titulo": "Empuje", "musculos": musculos}})
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["rutina"]["lunes"]["musculos"], musculos)
+        respuesta = self.client.post(
+            "/api/v1/ejercicios/",
+            {"nombre": "Sentadilla frontal", "musculos": ["recto_femoral", "vasto_lateral", "gluteo_mayor"]},
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        self.assertEqual(respuesta.data["musculos"], ["recto_femoral", "vasto_lateral", "gluteo_mayor"])
+        repetidos = self._plan(rutina={"lunes": {"musculos": ["soleo", "soleo"]}})
+        self.assertEqual(repetidos.status_code, 400)
+
+    def test_administrador_elige_entrenador_asignado(self):
+        respuesta = self._plan(entrenador=self.otro_entrenador.pk)
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+
+    def test_cliente_ve_su_plan_y_la_imagen_pero_no_puede_crearlo(self):
+        ejercicio = Ejercicio.objects.create(
+            gimnasio=self.gym_a, nombre="Press militar", musculos=["hombros"], imagen=self._png()
+        )
+        self._autenticar(self.entrenador.usuario)
+        plan_id = self._plan().data["id"]
+        fila = self.client.post(
+            "/api/v1/planes-entrenamiento-ejercicios/",
+            {"plan": plan_id, "ejercicio": ejercicio.pk, "dia_semana": "lunes", "orden": 1,
+             "series": 4, "repeticiones": 10},
+            format="json",
+        )
+        self.assertEqual(fila.status_code, 201, fila.data)
+
+        self._autenticar(self.cliente_a.usuario)
+        planes = self.client.get("/api/v1/planes-entrenamiento/").data["results"]
+        self.assertEqual([plan["id"] for plan in planes], [plan_id])
+        filas = self.client.get("/api/v1/planes-entrenamiento-ejercicios/", {"plan": plan_id}).data["results"]
+        url = filas[0]["ejercicio_detalle"]["imagen_url"]
+        self.assertIn("/planes-entrenamiento-ejercicios/", url)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/ejercicios/{ejercicio.pk}/imagen/").status_code, 403)
+        self.assertEqual(self._plan().status_code, 403)

@@ -8,6 +8,13 @@ import { ApiClient } from '../../../core/api/api-client.service';
 import { ApiError } from '../../../core/api/api-error';
 import type { PaginatedResponse, Role, UserDetail, UserSummary } from '../../../core/api/api.models';
 import { AuthService } from '../../../core/auth/auth.service';
+import {
+  contrasenaNoNumerica,
+  erroresDelServidor,
+  fechaNoFutura,
+  mensajeValidacion,
+  telefonoValido,
+} from '../../../core/forms/field-errors';
 import { roleLabel } from '../../../core/rbac/permissions';
 import { ConfirmService } from '../../../core/ui/confirm.service';
 import { ToastService } from '../../../core/ui/toast.service';
@@ -64,6 +71,7 @@ export class AuthorizedUsersPage implements OnInit {
   protected readonly saving = signal(false);
   protected readonly formError = signal<string | null>(null);
   protected readonly roleDraft = signal<ReadonlySet<number>>(new Set());
+  protected readonly primaryRoleId = signal<number | null>(null);
 
   protected readonly search = this.formBuilder.nonNullable.control('');
   protected readonly roleFilter = this.formBuilder.nonNullable.control<number | ''>('');
@@ -74,15 +82,15 @@ export class AuthorizedUsersPage implements OnInit {
     nombre: ['', [Validators.required, Validators.maxLength(150)]],
     username: [''],
     correo: ['', [Validators.required, Validators.email]],
-    contrasena: ['', [Validators.required, Validators.minLength(8)]],
-    telefono: [''],
+    contrasena: ['', [Validators.required, Validators.minLength(8), contrasenaNoNumerica]],
+    telefono: ['', [telefonoValido]],
     is_active: [true],
     tipo_documento: [''],
-    numero_documento: [''],
-    fecha_nacimiento: [''],
-    objetivo: [''],
-    peso_kg: [''],
-    estatura_cm: [''],
+    numero_documento: ['', [Validators.maxLength(30)]],
+    fecha_nacimiento: ['', [fechaNoFutura]],
+    objetivo: ['', [Validators.maxLength(255)]],
+    peso_kg: ['', [Validators.min(1), Validators.max(400)]],
+    estatura_cm: ['', [Validators.min(50), Validators.max(260)]],
     especialidad: [''],
     certificacion: [''],
     licencia_profesional: [''],
@@ -104,8 +112,13 @@ export class AuthorizedUsersPage implements OnInit {
 
   protected readonly activeRoles = computed(() => this.roles().filter((role) => role.is_active));
 
+  /** Errores que devolvió la API para el formulario de alta, por campo. */
+  protected readonly serverErrors = signal<Record<string, string>>({});
+  /** Rol elegido en el alta; señal para que el perfil cambie al elegir otro. */
+  private readonly rolSeleccionado = signal(0);
+
   protected readonly profileRole = computed(() => {
-    const id = this.createForm.controls.rol.value;
+    const id = this.rolSeleccionado();
     return this.roles().find((role) => role.id === id)?.nombre ?? '';
   });
 
@@ -119,6 +132,17 @@ export class AuthorizedUsersPage implements OnInit {
   protected readonly canDelete = computed(() => this.auth.hasPermission('usuarios:delete'));
 
   ngOnInit(): void {
+    this.createForm.controls.rol.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((rol) => this.rolSeleccionado.set(Number(rol)));
+    for (const nombre of Object.keys(this.createForm.controls)) {
+      this.createForm.get(nombre)?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+        if (this.serverErrors()[nombre]) {
+          const { [nombre]: _, ...resto } = this.serverErrors();
+          this.serverErrors.set(resto);
+        }
+      });
+    }
     this.loadRoles();
     this.load();
     this.search.valueChanges
@@ -211,8 +235,28 @@ export class AuthorizedUsersPage implements OnInit {
     return roleLabel(this.roles().find((role) => role.id === id)?.nombre ?? '');
   }
 
+  /** Error a mostrar encima del campo: primero el de la API, luego el local. */
+  protected fieldError(nombre: keyof typeof this.createForm.controls): string | null {
+    const servidor = this.serverErrors()[nombre];
+    if (servidor) return servidor;
+    const control = this.createForm.controls[nombre];
+    return control.touched && control.invalid ? mensajeValidacion(control) : null;
+  }
+
   protected openCreate(): void {
+    // Crear cuentas y elegir su rol es exclusivo del administrador
+    // (la API lo exige también); el superusuario entra como administrador.
+    if (!this.auth.isAdmin()) return;
+    this.openSelfRegister();
+  }
+
+  /**
+   * Open the creation modal for self‑registration.
+   * Reuses the same form and validation as the admin flow.
+   */
+  protected openSelfRegister(): void {
     this.formError.set(null);
+    this.serverErrors.set({});
     this.createForm.reset({
       rol: this.activeRoles()[0]?.id ?? 0,
       nombre: '',
@@ -236,6 +280,7 @@ export class AuthorizedUsersPage implements OnInit {
       fecha_ingreso: '',
       turno_preferido: '',
     });
+    this.rolSeleccionado.set(this.createForm.controls.rol.value);
     this.editor.set('create');
   }
 
@@ -265,7 +310,21 @@ export class AuthorizedUsersPage implements OnInit {
           .map((role) => role.id),
       ),
     );
+    this.primaryRoleId.set(detail.rol);
     this.editor.set('roles');
+  }
+
+  protected changePrimaryRole(roleIdStr: string): void {
+    if (!this.auth.isAdmin()) return;
+    const roleId = Number(roleIdStr);
+    if (!Number.isFinite(roleId) || roleId <= 0) return;
+    this.primaryRoleId.set(roleId);
+    // El rol principal siempre se conserva entre las asignaciones activas.
+    this.roleDraft.update((current) => {
+      const next = new Set(current);
+      next.add(roleId);
+      return next;
+    });
   }
 
   protected closeEditor(): void {
@@ -276,8 +335,10 @@ export class AuthorizedUsersPage implements OnInit {
 
   protected saveCreate(): void {
     this.formError.set(null);
+    this.serverErrors.set({});
     if (this.createForm.invalid) {
       this.createForm.markAllAsTouched();
+      this.formError.set('Revisa los campos marcados: cada uno indica qué hay que corregir.');
       return;
     }
     const raw = this.createForm.getRawValue();
@@ -314,7 +375,22 @@ export class AuthorizedUsersPage implements OnInit {
       },
       error: (error: unknown) => {
         this.saving.set(false);
-        this.formError.set(this.errorMessage(error, 'No se pudo crear el usuario.'));
+        const porCampo = erroresDelServidor(error);
+        const campos = Object.keys(this.createForm.controls);
+        const conocidos = Object.fromEntries(
+          Object.entries(porCampo).filter(([campo]) => campos.includes(campo)),
+        );
+        this.serverErrors.set(conocidos);
+        const otros = Object.entries(porCampo)
+          .filter(([campo]) => !campos.includes(campo))
+          .map(([, mensaje]) => mensaje);
+        if (otros.length) {
+          this.formError.set(otros.join(' '));
+        } else if (Object.keys(conocidos).length) {
+          this.formError.set('Revisa los campos marcados: cada uno indica qué hay que corregir.');
+        } else {
+          this.formError.set(this.errorMessage(error, 'No se pudo crear el usuario.'));
+        }
       },
     });
   }
@@ -358,8 +434,13 @@ export class AuthorizedUsersPage implements OnInit {
     if (!detail) return;
     this.saving.set(true);
     this.formError.set(null);
+    const primaryRoleId = this.primaryRoleId() ?? detail.rol;
+    const roleIds = [...this.roleDraft()].filter((roleId) => roleId !== primaryRoleId);
     this.api
-      .patch<UserDetail>(`usuarios/${detail.id}/roles/`, { roles: [...this.roleDraft()] })
+      .patch<UserDetail>(`usuarios/${detail.id}/roles/`, {
+        roles: roleIds,
+        rol_principal: primaryRoleId,
+      })
       .subscribe({
         next: (user) => {
           this.saving.set(false);
@@ -464,7 +545,7 @@ export class AuthorizedUsersPage implements OnInit {
     return formatDate(this.detail()?.created_at);
   }
 
-  protected roleLabel = roleLabel;
+  public roleLabel = roleLabel;
 
   private loadRoles(): void {
     this.api.getAll<Role>('roles/', { is_active: true }).subscribe({

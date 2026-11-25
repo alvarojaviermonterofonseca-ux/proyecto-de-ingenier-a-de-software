@@ -1,0 +1,28 @@
+Modelo anatómico 3D: anatomia-muscular.glb
+==========================================
+
+Origen: BodyParts3D, Copyright (c) 2008 Life Science Integrated Database Center
+(DBCLS), https://lifesciencedb.jp/bp3d/
+
+Licencia: Creative Commons Reconocimiento-CompartirIgual 2.1 Japón (CC BY-SA 2.1 JP)
+https://creativecommons.org/licenses/by-sa/2.1/jp/deed.es
+
+Crédito exigido por el autor:
+"BodyParts3D, Copyright (c) 2008 Life Science Integrated Database Center licensed by CC Attribution-Share Alike 2.1 Japan"
+
+Mallas tomadas de la conversión a STL de BodyParts3D 3.0 publicada en
+https://github.com/Kevin-Mattheus-Moerman/BodyParts3D (mismo contenido y licencia).
+
+Cambios hechos para Gym Control Pro (obra derivada, se comparte con la misma licencia):
+- Se eligieron los músculos esqueléticos, huesos y tendones (sin órganos, vasos,
+  nervios, piel ni genitales).
+- Las piezas de cada músculo del catálogo se agruparon en una malla por lado,
+  con nombre M_<codigo>_<R|L|C> (por ejemplo M_pectoral_mayor_R).
+- Huesos, tendones y el resto de músculos se agruparon en X_huesos, X_tendones
+  y X_musculos.
+- En los oblicuos externo e interno se retiró la parte de la aponeurosis que
+  tapa por delante al recto abdominal, para que este sea visible.
+- Se redujo el número de triángulos (simplificación por cuádricas), se pasó a
+  metros con el eje Y hacia arriba y se comprimió con gltfpack (meshopt).
+
+Esta licencia aplica solo al modelo 3D; el código de Gym Control Pro no cambia de licencia.

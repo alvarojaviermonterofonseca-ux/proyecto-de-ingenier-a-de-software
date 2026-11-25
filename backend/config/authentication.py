@@ -23,7 +23,7 @@ class UsuarioTokenAuthentication(authentication.BaseAuthentication):
             raise AuthenticationFailed("El encabezado Authorization debe usar el formato Bearer <token>.")
 
         sesion = (
-            Sesion.objects.select_related("usuario__rol")
+            Sesion.objects.select_related("usuario__rol", "usuario__gimnasio")
             .filter(token_hash=Sesion.hash_token(partes[1]), expira_at__gt=timezone.now())
             .first()
         )
@@ -33,6 +33,9 @@ class UsuarioTokenAuthentication(authentication.BaseAuthentication):
         usuario = sesion.usuario
         if not usuario.is_active or usuario.deleted_at is not None or not usuario.rol.is_active:
             raise AuthenticationFailed("La cuenta no está disponible.")
+        gimnasio = usuario.gimnasio
+        if not gimnasio.is_active or gimnasio.deleted_at is not None:
+            raise AuthenticationFailed("El gimnasio de esta cuenta no está activo.")
 
         return usuario, sesion
 

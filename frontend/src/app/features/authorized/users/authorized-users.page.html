@@ -235,54 +235,63 @@
 >
   <form [formGroup]="createForm" (ngSubmit)="saveCreate()" novalidate>
     @if (formError()) {
-      <div class="notice notice--error">{{ formError() }}</div>
+      <div class="notice notice--error" role="alert">{{ formError() }}</div>
     }
 
     <div class="form-section">
       <h3>Identidad</h3>
       <div class="form-grid">
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('rol')">
           <label for="create-rol">Rol principal</label>
-          <select id="create-rol" formControlName="rol">
+          @if (fieldError('rol'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
+          }
+          <select id="create-rol" formControlName="rol" [attr.aria-invalid]="!!fieldError('rol')">
             @for (role of activeRoles(); track role.id) {
               <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
             }
           </select>
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('nombre')">
           <label for="create-nombre">Nombre completo</label>
-          <input id="create-nombre" type="text" formControlName="nombre" autocomplete="name" />
-          @if (createForm.controls.nombre.touched && createForm.controls.nombre.invalid) {
-            <p class="field-error">Escribe el nombre.</p>
+          @if (fieldError('nombre'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
           }
+          <input id="create-nombre" type="text" formControlName="nombre" [attr.aria-invalid]="!!fieldError('nombre')" autocomplete="name" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('correo')">
           <label for="create-correo">Correo</label>
-          <input id="create-correo" type="email" formControlName="correo" autocomplete="email" />
-          @if (createForm.controls.correo.touched && createForm.controls.correo.invalid) {
-            <p class="field-error">Usa un correo válido.</p>
+          @if (fieldError('correo'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
           }
+          <input id="create-correo" type="email" formControlName="correo" [attr.aria-invalid]="!!fieldError('correo')" autocomplete="email" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('username')">
           <label for="create-username">Usuario</label>
-          <input id="create-username" type="text" formControlName="username" autocomplete="username" />
+          @if (fieldError('username'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="create-username" type="text" formControlName="username" [attr.aria-invalid]="!!fieldError('username')" autocomplete="username" />
           <p class="field-help">Opcional. Se genera a partir del correo si se deja vacío.</p>
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('telefono')">
           <label for="create-telefono">Teléfono</label>
-          <input id="create-telefono" type="tel" formControlName="telefono" autocomplete="tel" />
+          @if (fieldError('telefono'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="create-telefono" type="tel" formControlName="telefono" [attr.aria-invalid]="!!fieldError('telefono')" autocomplete="tel" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('contrasena')">
           <label for="create-contrasena">Contraseña temporal</label>
+          @if (fieldError('contrasena'); as mensaje) {
+            <p class="field-error" role="alert">{{ mensaje }}</p>
+          }
           <input
             id="create-contrasena"
             type="text"
-            formControlName="contrasena"
+            formControlName="contrasena" [attr.aria-invalid]="!!fieldError('contrasena')"
             autocomplete="new-password"
           />
-          @if (createForm.controls.contrasena.touched && createForm.controls.contrasena.invalid) {
-            <p class="field-error">Mínimo 8 caracteres.</p>
-          }
         </div>
         <label class="inline-check field--full">
           <input type="checkbox" formControlName="is_active" />
@@ -296,9 +305,12 @@
         <h3>Perfil de {{ roleLabel(profileRole()) }}</h3>
         <div class="form-grid">
           @if (profileRole() === 'cliente') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('tipo_documento')">
               <label for="create-tipo">Tipo de documento</label>
-              <select id="create-tipo" formControlName="tipo_documento">
+              @if (fieldError('tipo_documento'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <select id="create-tipo" formControlName="tipo_documento" [attr.aria-invalid]="!!fieldError('tipo_documento')">
                 <option value="">Sin especificar</option>
                 <option value="CC">Cédula de ciudadanía</option>
                 <option value="CE">Cédula de extranjería</option>
@@ -306,65 +318,104 @@
                 <option value="PA">Pasaporte</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('numero_documento')">
               <label for="create-numero">Número de documento</label>
-              <input id="create-numero" type="text" formControlName="numero_documento" />
+              @if (fieldError('numero_documento'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-numero" type="text" formControlName="numero_documento" [attr.aria-invalid]="!!fieldError('numero_documento')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('fecha_nacimiento')">
               <label for="create-nacimiento">Fecha de nacimiento</label>
-              <input id="create-nacimiento" type="date" formControlName="fecha_nacimiento" />
+              @if (fieldError('fecha_nacimiento'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-nacimiento" type="date" formControlName="fecha_nacimiento" [attr.aria-invalid]="!!fieldError('fecha_nacimiento')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('objetivo')">
               <label for="create-objetivo">Objetivo</label>
-              <input id="create-objetivo" type="text" formControlName="objetivo" />
+              @if (fieldError('objetivo'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-objetivo" type="text" formControlName="objetivo" [attr.aria-invalid]="!!fieldError('objetivo')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('peso_kg')">
               <label for="create-peso">Peso (kg)</label>
-              <input id="create-peso" type="number" step="0.1" formControlName="peso_kg" />
+              @if (fieldError('peso_kg'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-peso" type="number" step="0.1" formControlName="peso_kg" [attr.aria-invalid]="!!fieldError('peso_kg')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('estatura_cm')">
               <label for="create-estatura">Estatura (cm)</label>
-              <input id="create-estatura" type="number" formControlName="estatura_cm" />
+              @if (fieldError('estatura_cm'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-estatura" type="number" formControlName="estatura_cm" [attr.aria-invalid]="!!fieldError('estatura_cm')" />
             </div>
           }
           @if (profileRole() === 'entrenador') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('especialidad')">
               <label for="create-especialidad">Especialidad</label>
-              <input id="create-especialidad" type="text" formControlName="especialidad" />
+              @if (fieldError('especialidad'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-especialidad" type="text" formControlName="especialidad" [attr.aria-invalid]="!!fieldError('especialidad')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('certificacion')">
               <label for="create-certificacion">Certificación</label>
-              <input id="create-certificacion" type="text" formControlName="certificacion" />
+              @if (fieldError('certificacion'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-certificacion" type="text" formControlName="certificacion" [attr.aria-invalid]="!!fieldError('certificacion')" />
             </div>
-            <div class="field field--full">
+            <div class="field field--full" [class.has-error]="fieldError('biografia')">
               <label for="create-bio">Biografía</label>
-              <textarea id="create-bio" formControlName="biografia"></textarea>
+              @if (fieldError('biografia'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <textarea id="create-bio" formControlName="biografia" [attr.aria-invalid]="!!fieldError('biografia')"></textarea>
             </div>
           }
           @if (profileRole() === 'terapeuta') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('especialidad')">
               <label for="create-especialidad-t">Especialidad</label>
-              <input id="create-especialidad-t" type="text" formControlName="especialidad" />
+              @if (fieldError('especialidad'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-especialidad-t" type="text" formControlName="especialidad" [attr.aria-invalid]="!!fieldError('especialidad')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('licencia_profesional')">
               <label for="create-licencia">Licencia profesional</label>
-              <input id="create-licencia" type="text" formControlName="licencia_profesional" />
+              @if (fieldError('licencia_profesional'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-licencia" type="text" formControlName="licencia_profesional" [attr.aria-invalid]="!!fieldError('licencia_profesional')" />
             </div>
           }
           @if (profileRole() === 'recepcionista') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('turno_preferido')">
               <label for="create-turno">Turno preferido</label>
-              <input id="create-turno" type="text" formControlName="turno_preferido" />
+              @if (fieldError('turno_preferido'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-turno" type="text" formControlName="turno_preferido" [attr.aria-invalid]="!!fieldError('turno_preferido')" />
             </div>
           }
           @if (profileRole() === 'administrador') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('cargo')">
               <label for="create-cargo">Cargo</label>
-              <input id="create-cargo" type="text" formControlName="cargo" />
+              @if (fieldError('cargo'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-cargo" type="text" formControlName="cargo" [attr.aria-invalid]="!!fieldError('cargo')" />
             </div>
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('nivel_permisos')">
               <label for="create-nivel">Nivel de permisos</label>
-              <select id="create-nivel" formControlName="nivel_permisos">
+              @if (fieldError('nivel_permisos'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <select id="create-nivel" formControlName="nivel_permisos" [attr.aria-invalid]="!!fieldError('nivel_permisos')">
                 <option value="operativo">Operativo</option>
                 <option value="gestion">Gestión</option>
                 <option value="total">Total</option>
@@ -372,9 +423,12 @@
             </div>
           }
           @if (profileRole() !== 'cliente') {
-            <div class="field">
+            <div class="field" [class.has-error]="fieldError('fecha_ingreso')">
               <label for="create-ingreso">Fecha de ingreso</label>
-              <input id="create-ingreso" type="date" formControlName="fecha_ingreso" />
+              @if (fieldError('fecha_ingreso'); as mensaje) {
+                <p class="field-error" role="alert">{{ mensaje }}</p>
+              }
+              <input id="create-ingreso" type="date" formControlName="fecha_ingreso" [attr.aria-invalid]="!!fieldError('fecha_ingreso')" />
             </div>
           }
         </div>
@@ -443,4 +497,77 @@
       </button>
     </div>
   </form>
+</app-modal>
+
+<app-modal
+  [open]="editor() === 'roles'"
+  title="Roles y rol principal"
+  subtitle="El rol principal define el perfil y los accesos base; los roles adicionales suman permisos."
+  (closed)="closeEditor()"
+>
+  @if (formError()) {
+    <div class="notice notice--error">{{ formError() }}</div>
+  }
+
+  @if (detail(); as user) {
+    <div class="field" style="margin-bottom: 1.25rem;">
+      <label for="assign-primary-role-user" style="display: block; margin-bottom: 0.4rem; font-weight: 500;">
+        Rol principal
+      </label>
+      <select
+        id="assign-primary-role-user"
+        class="field-input"
+        style="width: 100%; padding: 0.6rem 0.75rem;"
+        [value]="primaryRoleId() ?? user.rol"
+        [disabled]="!auth.isAdmin()"
+        (change)="changePrimaryRole($any($event.target).value)"
+      >
+        @for (role of activeRoles(); track role.id) {
+          <option [value]="role.id">{{ roleLabel(role.nombre) }}</option>
+        }
+      </select>
+      @if (auth.isAdmin()) {
+        <p class="field-help">
+          Cambiar el rol principal reemplaza el perfil anterior. Si ese perfil tiene
+          datos asociados, primero reasígnalos o elimínalos.
+        </p>
+      } @else {
+        <p class="field-help">Solo un administrador puede cambiar el rol principal.</p>
+      }
+    </div>
+
+    <ul class="role-checklist">
+      @for (role of activeRoles(); track role.id) {
+        <li>
+          <label [class.is-locked]="role.id === primaryRoleId()">
+            <input
+              type="checkbox"
+              [checked]="roleDraft().has(role.id) || role.id === primaryRoleId()"
+              [disabled]="role.id === primaryRoleId()"
+              (change)="toggleRole(role.id, $any($event.target).checked)"
+            />
+            <span class="role-info">
+              <strong>{{ roleLabel(role.nombre) }}</strong>
+              <small>{{ role.descripcion || 'Sin descripción' }} · {{ role.permisos.length }} permisos</small>
+            </span>
+            @if (role.id === primaryRoleId()) {
+              <span class="tag tag--muted">Principal</span>
+            }
+          </label>
+        </li>
+      }
+    </ul>
+  }
+
+  <div class="form-actions">
+    <button class="button button--ghost" type="button" (click)="closeEditor()">Cancelar</button>
+    <button
+      class="button button--primary"
+      type="button"
+      (click)="saveRoles()"
+      [disabled]="saving() || !detail()"
+    >
+      {{ saving() ? 'Guardando…' : 'Guardar roles' }}
+    </button>
+  </div>
 </app-modal>

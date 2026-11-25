@@ -3,7 +3,7 @@ import { Injectable, computed, inject, signal, OnDestroy } from '@angular/core';
 import { Observable, firstValueFrom, switchMap, tap } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import type { CurrentUser, LoginResponse } from '../api/api.models';
+import type { CurrentUser, LoginResponse, RegisterPayload } from '../api/api.models';
 import { SESSION_EXPIRED_EVENT, TokenStorage } from './token-storage.service';
 
 @Injectable({ providedIn: 'root' })
@@ -40,6 +40,16 @@ export class AuthService {
   login(correo: string, contrasena: string): Observable<CurrentUser> {
     return this.http
       .post<LoginResponse>(`${this.baseUrl}/login/`, { correo, contrasena })
+      .pipe(
+        tap((response) => this.tokens.save(response.token, response.expira_at)),
+        switchMap(() => this.http.get<CurrentUser>(`${this.baseUrl}/me/`)),
+        tap((user) => this.applyUser(user)),
+      );
+  }
+
+  register(payload: RegisterPayload): Observable<CurrentUser> {
+    return this.http
+      .post<LoginResponse>(`${this.baseUrl}/registro/`, payload)
       .pipe(
         tap((response) => this.tokens.save(response.token, response.expira_at)),
         switchMap(() => this.http.get<CurrentUser>(`${this.baseUrl}/me/`)),

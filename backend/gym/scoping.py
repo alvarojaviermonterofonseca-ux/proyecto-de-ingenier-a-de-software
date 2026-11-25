@@ -1,5 +1,6 @@
 from .models import Cliente, ClienteEntrenador, ClienteTerapeuta, Rol, Usuario
 from .permissions import es_administrador
+from .tenancy import filtrar_por_gimnasio
 
 
 def rol_principal(user):
@@ -29,6 +30,14 @@ def es_personal_django(user):
     )
 
 
+def _clientes_del_gimnasio(user):
+    return filtrar_por_gimnasio(Cliente.objects.all(), user)
+
+
+def _usuarios_del_gimnasio(user):
+    return filtrar_por_gimnasio(Usuario.objects.all(), user)
+
+
 def _clientes_asignados(usuario, relacion, perfil):
     filtro = {
         f"{relacion}__activo": True,
@@ -46,7 +55,7 @@ def _clientes_asignados(usuario, relacion, perfil):
 
 def clientes_clinicos(user):
     if es_administrador(user) or es_personal_django(user):
-        return Cliente.objects.all()
+        return _clientes_del_gimnasio(user)
     if not isinstance(user, Usuario):
         return Cliente.objects.none()
     roles = roles_efectivos_nombres(user)
@@ -61,20 +70,20 @@ def clientes_clinicos(user):
         permitidos |= _clientes_asignados(
             user, "asignaciones_terapeuta", "terapeuta"
         )
-    return permitidos.distinct()
+    return filtrar_por_gimnasio(permitidos.distinct(), user)
 
 
 def clientes_operativos(user):
     if es_administrador(user) or es_personal_django(user):
-        return Cliente.objects.all()
+        return _clientes_del_gimnasio(user)
     if Rol.Nombre.RECEPCIONISTA in roles_efectivos_nombres(user):
-        return Cliente.objects.all()
+        return _clientes_del_gimnasio(user)
     return clientes_clinicos(user)
 
 
 def usuarios_visibles(user):
     if es_administrador(user) or es_personal_django(user):
-        return Usuario.objects.all()
+        return _usuarios_del_gimnasio(user)
     if not isinstance(user, Usuario):
         return Usuario.objects.none()
     visibles = Usuario.objects.filter(pk=user.pk)
@@ -86,7 +95,7 @@ def usuarios_visibles(user):
                 Rol.Nombre.RECEPCIONISTA,
             )
         )
-    return visibles.distinct()
+    return filtrar_por_gimnasio(visibles.distinct(), user)
 
 
 def filtrar_clientes(queryset, campo, user, operativo=False):
@@ -96,7 +105,7 @@ def filtrar_clientes(queryset, campo, user, operativo=False):
 
 def filtrar_asignaciones_entrenador(queryset, user):
     if es_administrador(user) or es_personal_django(user):
-        return queryset
+        return filtrar_por_gimnasio(queryset, user)
     if not isinstance(user, Usuario):
         return queryset.none()
     roles = roles_efectivos_nombres(user)
@@ -110,7 +119,7 @@ def filtrar_asignaciones_entrenador(queryset, user):
 
 def filtrar_asignaciones_terapeuta(queryset, user):
     if es_administrador(user) or es_personal_django(user):
-        return queryset
+        return filtrar_por_gimnasio(queryset, user)
     if not isinstance(user, Usuario):
         return queryset.none()
     roles = roles_efectivos_nombres(user)
@@ -124,7 +133,7 @@ def filtrar_asignaciones_terapeuta(queryset, user):
 
 def filtrar_perfil(queryset, user, nombre_perfil):
     if es_administrador(user) or es_personal_django(user):
-        return queryset
+        return filtrar_por_gimnasio(queryset, user)
     if not isinstance(user, Usuario):
         return queryset.none()
     roles = roles_efectivos_nombres(user)

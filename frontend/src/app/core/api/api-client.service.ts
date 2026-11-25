@@ -45,8 +45,11 @@ export class ApiClient {
     return this.http.patch<T>(this.url(path), formData);
   }
 
-  blob(path: string): Observable<Blob> {
-    return this.http.get(this.url(path), { responseType: 'blob' });
+  blob(path: string, params: QueryParams = {}): Observable<Blob> {
+    return this.http.get(this.url(path), {
+      params: this.params(params),
+      responseType: 'blob',
+    });
   }
 
   private fetchAll<T>(

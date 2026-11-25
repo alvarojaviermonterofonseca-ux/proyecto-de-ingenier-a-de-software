@@ -6,30 +6,43 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdministradorViewSet,
+    AlertaViewSet,
     AsistenciaViewSet,
     CambiarContrasenaView,
+    CategoriaGastoViewSet,
     ClienteEntrenadorViewSet,
     ClienteTerapeutaViewSet,
     ClienteViewSet,
     ComidaViewSet,
     ConteoRecursosView,
+    DashboardFinancieroView,
+    GimnasioActualView,
+    ReporteView,
     EjercicioViewSet,
     EntrenadorViewSet,
     EntrenamientoViewSet,
     EventoAuditoriaViewSet,
+    GastoViewSet,
     LoginView,
     LogoutAllView,
     LogoutView,
+    MembresiaViewSet,
+    MetodoPagoViewSet,
     NotificacionViewSet,
+    PagoViewSet,
     PermisoViewSet,
     PerfilActualDetalleView,
     PerfilActualView,
-    ResumenView,
     PlanAlimentacionViewSet,
     PlanEntrenamientoEjercicioViewSet,
     PlanEntrenamientoViewSet,
     RecepcionistaViewSet,
     RegistroComidaViewSet,
+    RegistroView,
+    ResourceAliasDetailView,
+    ResourceAliasListView,
+    ResourceAliasResolveView,
+    ResumenView,
     RolPermisoViewSet,
     RolViewSet,
     TerapeutaViewSet,
@@ -74,15 +87,40 @@ router.register("comidas", ComidaViewSet, basename="comida")
 router.register("registros-comida", RegistroComidaViewSet, basename="registro-comida")
 router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 router.register("auditoria", EventoAuditoriaViewSet, basename="evento-auditoria")
+router.register("metodos-pago", MetodoPagoViewSet, basename="metodo-pago")
+router.register("categorias-gasto", CategoriaGastoViewSet, basename="categoria-gasto")
+router.register("pagos", PagoViewSet, basename="pago")
+router.register("gastos", GastoViewSet, basename="gasto")
+router.register("membresias", MembresiaViewSet, basename="membresia")
+router.register("alertas", AlertaViewSet, basename="alerta")
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
+    path("registro/", RegistroView.as_view(), name="registro"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("logout/all/", LogoutAllView.as_view(), name="logout-all"),
     path("me/", PerfilActualView.as_view(), name="perfil-actual"),
     path("me/password/", CambiarContrasenaView.as_view(), name="cambiar-contrasena"),
     path("me/perfil/", PerfilActualDetalleView.as_view(), name="perfil-actual-detalle"),
     path("resumen/", ResumenView.as_view(), name="resumen"),
+    path("dashboard/", DashboardFinancieroView.as_view(), name="dashboard-financiero"),
+    path("gimnasio/", GimnasioActualView.as_view(), name="gimnasio-actual"),
+    path("reportes/<slug:tipo>/", ReporteView.as_view(), name="reporte"),
     path("conteos/", ConteoRecursosView.as_view(), name="conteos"),
+    path(
+        "resource-aliases/",
+        ResourceAliasListView.as_view(),
+        name="resource-alias-list",
+    ),
+    path(
+        "resource-aliases/<str:nombre_original>/",
+        ResourceAliasDetailView.as_view(),
+        name="resource-alias-detail",
+    ),
+    path(
+        "resource-aliases/resolve/<str:nombre>/",
+        ResourceAliasResolveView.as_view(),
+        name="resource-alias-resolve",
+    ),
     *router.urls,
 ]

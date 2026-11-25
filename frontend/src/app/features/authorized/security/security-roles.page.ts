@@ -3,7 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { ApiClient } from '../../../core/api/api-client.service';
 import { ApiError } from '../../../core/api/api-error';
-import type { Role, UserDetail } from '../../../core/api/api.models';
+import type { Role, UserSummary } from '../../../core/api/api.models';
 import { AuthService } from '../../../core/auth/auth.service';
 import {
   PermissionCatalogService,
@@ -46,7 +46,7 @@ export class SecurityRolesPage implements OnInit {
   protected readonly roleLabel = roleLabel;
 
   protected readonly roles = signal<Role[]>([]);
-  protected readonly users = signal<UserDetail[]>([]);
+  protected readonly users = signal<UserSummary[]>([]);
   protected readonly selectedId = signal<number | null>(null);
   protected readonly draft = signal<ReadonlySet<string>>(new Set());
   protected readonly query = signal('');
@@ -57,8 +57,9 @@ export class SecurityRolesPage implements OnInit {
   protected readonly formError = signal<string | null>(null);
   protected readonly editor = signal<'create' | 'roles' | null>(null);
 
-  protected readonly selectedUser = signal<UserDetail | null>(null);
+  protected readonly selectedUser = signal<UserSummary | null>(null);
   protected readonly roleDraft = signal<Set<number>>(new Set());
+  protected readonly primaryRoleId = signal<number | null>(null);
 
   protected readonly activeRoles = computed(() => this.roles().filter((role) => role.is_active));
 
@@ -151,7 +152,7 @@ export class SecurityRolesPage implements OnInit {
   }
 
   protected loadUsers(): void {
-    this.api.getAll<UserDetail>('usuarios/').subscribe({
+    this.api.getAll<UserSummary>('usuarios/').subscribe({
       next: (users) => this.users.set(users),
       error: () => this.users.set([]),
     });
@@ -237,6 +238,8 @@ export class SecurityRolesPage implements OnInit {
           this.roles.update((roles) =>
             roles.map((item) => (item.id === role.id ? { ...item, permisos } : item)),
           );
+          // Clear any lingering welcome toast
+          this.toast.clearAll();
           this.toast.success(
             'Permisos guardados',
             'El menú y los accesos se actualizan sin cerrar la sesión.',
@@ -322,21 +325,21 @@ export class SecurityRolesPage implements OnInit {
     });
   }
 
+  /** Los roles del sistema son compartidos por todos los gimnasios: no se eliminan desde aquí. */
   protected isProtected(role: Role): boolean {
-    return role.nombre === 'administrador';
+    return role.es_del_sistema === true || role.nombre === 'administrador';
   }
+
 
   // --- Asignación de roles a usuarios ---
 
-  protected openAssignRoles(user?: UserDetail): void {
+  protected openAssignRoles(user?: UserSummary): void {
     this.formError.set(null);
     if (user) {
-      this.selectedUser.set(user);
-      this.roleDraft.set(new Set((user.roles_detalle ?? []).map((r) => r.id)));
+      this.seleccionarUsuarioParaRoles(user);
     } else {
       const first = this.users()[0] ?? null;
-      this.selectedUser.set(first);
-      this.roleDraft.set(first ? new Set((first.roles_detalle ?? []).map((r) => r.id)) : new Set());
+      this.seleccionarUsuarioParaRoles(first);
     }
     this.editor.set('roles');
   }
@@ -344,11 +347,13 @@ export class SecurityRolesPage implements OnInit {
   protected openAssignThisRole(role: Role): void {
     this.formError.set(null);
     const first = this.users()[0] ?? null;
-    this.selectedUser.set(first);
+    this.seleccionarUsuarioParaRoles(first);
     if (first) {
-      const set = new Set((first.roles_detalle ?? []).map((r) => r.id));
-      set.add(role.id);
-      this.roleDraft.set(set);
+      this.roleDraft.update((current) => {
+        const next = new Set(current);
+        next.add(role.id);
+        return next;
+      });
     } else {
       this.roleDraft.set(new Set([role.id]));
     }
@@ -358,11 +363,31 @@ export class SecurityRolesPage implements OnInit {
   protected selectUserForAssignment(userIdStr: string): void {
     const id = Number(userIdStr);
     const user = this.users().find((u) => u.id === id) ?? null;
+    this.seleccionarUsuarioParaRoles(user);
+  }
+
+  protected changePrimaryRole(roleIdStr: string): void {
+    if (!this.auth.isAdmin()) return;
+    const roleId = Number(roleIdStr);
+    if (!Number.isFinite(roleId) || roleId <= 0) return;
+    const previous = this.primaryRoleId();
+    this.roleDraft.update((current) => {
+      const next = new Set(current);
+      next.add(roleId);
+      if (previous !== null && previous !== roleId) next.delete(previous);
+      return next;
+    });
+    this.primaryRoleId.set(roleId);
+  }
+
+  private seleccionarUsuarioParaRoles(user: UserSummary | null): void {
     this.selectedUser.set(user);
     if (user) {
-      this.roleDraft.set(new Set((user.roles_detalle ?? []).map((r) => r.id)));
+      this.roleDraft.set(new Set((user.roles_efectivos ?? []).map((r) => r.id)));
+      this.primaryRoleId.set(user.rol);
     } else {
       this.roleDraft.set(new Set());
+      this.primaryRoleId.set(null);
     }
   }
 
@@ -388,16 +413,23 @@ export class SecurityRolesPage implements OnInit {
 
     this.saving.set(true);
     this.formError.set(null);
-    const roleIds = [...this.roleDraft()];
+    const primaryRoleId = this.primaryRoleId() ?? user.rol;
+    // El rol principal viaja aparte; ``roles`` contiene solo los adicionales.
+    const roleIds = [...this.roleDraft()].filter((roleId) => roleId !== primaryRoleId);
 
     this.api
-      .patch<UserDetail>(`usuarios/${user.id}/roles/`, { roles: roleIds })
+      .patch<UserSummary>(`usuarios/${user.id}/roles/`, {
+        roles: roleIds,
+        rol_principal: primaryRoleId,
+      })
       .subscribe({
         next: (updated) => {
           this.saving.set(false);
           this.editor.set(null);
           this.users.update((list) => list.map((u) => (u.id === updated.id ? updated : u)));
           this.load();
+          // Clear lingering welcome toast if any
+          this.toast.clearAll();
           this.toast.success(
             'Roles actualizados',
             `Se actualizaron los roles de ${user.nombre}. Las sesiones se renovaron.`,

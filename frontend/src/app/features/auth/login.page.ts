@@ -1,5 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  FormBuilder,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ApiError } from '../../core/api/api-error';
@@ -7,6 +13,8 @@ import { AuthService } from '../../core/auth/auth.service';
 import { ThemeService } from '../../core/ui/theme.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { IconComponent } from '../../shared/icon.component';
+
+type AuthMode = 'login' | 'registro';
 
 @Component({
   selector: 'app-login-page',
@@ -29,10 +37,33 @@ export class LoginPage {
   protected readonly showPassword = signal(false);
   protected readonly expired = signal(this.route.snapshot.queryParamMap.get('expired') === '1');
 
+  protected readonly mode = signal<AuthMode>('login');
+  protected readonly registering = signal(false);
+  protected readonly registerError = signal<string | null>(null);
+  protected readonly showRegisterPassword = signal(false);
+
   protected readonly form = this.formBuilder.nonNullable.group({
     correo: ['', [Validators.required, Validators.email]],
     contrasena: ['', [Validators.required]],
   });
+
+  private readonly passwordsMatch = (group: AbstractControl): ValidationErrors | null => {
+    const contrasena = group.get('contrasena')?.value;
+    const confirmar = group.get('confirmar')?.value;
+    return contrasena === confirmar ? null : { passwordsMismatch: true };
+  };
+
+  protected readonly registerForm = this.formBuilder.nonNullable.group(
+    {
+      nombre: ['', [Validators.required, Validators.minLength(2)]],
+      correo: ['', [Validators.required, Validators.email]],
+      telefono: [''],
+      gimnasio: ['', [Validators.maxLength(50)]],
+      contrasena: ['', [Validators.required, Validators.minLength(8)]],
+      confirmar: ['', [Validators.required]],
+    },
+    { validators: this.passwordsMatch },
+  );
 
   protected submit(): void {
     this.error.set(null);
@@ -59,8 +90,61 @@ export class LoginPage {
     });
   }
 
+  protected submitRegister(): void {
+    this.registerError.set(null);
+    if (this.registerForm.invalid) {
+      this.registerForm.markAllAsTouched();
+      return;
+    }
+    this.registering.set(true);
+    const { nombre, correo, telefono, gimnasio, contrasena } = this.registerForm.getRawValue();
+    const codigoGimnasio = gimnasio.trim().toLowerCase();
+    this.auth.register({
+      nombre: nombre.trim(),
+      correo: correo.trim(),
+      contrasena,
+      telefono: telefono.trim() || null,
+      ...(codigoGimnasio ? { gimnasio: codigoGimnasio } : {}),
+    }).subscribe({
+      next: (user) => {
+        this.registering.set(false);
+        this.toast.success(`Cuenta creada. Bienvenido, ${user.nombre.split(' ')[0]}`);
+        void this.router.navigateByUrl('/inicio');
+      },
+      error: (error: unknown) => {
+        this.registering.set(false);
+        this.registerError.set(this.registrationMessage(error));
+      },
+    });
+  }
+
+  protected openRegister(): void {
+    this.error.set(null);
+    this.registerError.set(null);
+    this.mode.set('registro');
+  }
+
+  protected openLogin(): void {
+    this.registerError.set(null);
+    this.showRegisterPassword.set(false);
+    this.registerForm.reset();
+    this.mode.set('login');
+  }
+
   protected togglePassword(): void {
     this.showPassword.update((visible) => !visible);
+  }
+
+  protected toggleRegisterPassword(): void {
+    this.showRegisterPassword.update((visible) => !visible);
+  }
+
+  private registrationMessage(error: unknown): string {
+    if (!(error instanceof ApiError)) {
+      return 'No se pudo crear la cuenta. Verifica tu conexión.';
+    }
+    const details = Object.values(error.fieldErrors()).filter(Boolean);
+    return details.length ? details.join(' ') : error.message;
   }
 
   private returnUrl(): string {

@@ -65,6 +65,7 @@ import { IconComponent } from './icon.component';
 export class PaginationComponent {
   readonly page = input.required<number>();
   readonly count = input.required<number>();
+  readonly totalItems = input<number>(0);
   readonly pageSize = input(25);
   readonly pageChange = output<number>();
   readonly totalPages = computed(() =>

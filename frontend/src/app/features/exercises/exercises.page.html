@@ -23,6 +23,16 @@
           (input)="updateSearch($any($event.target).value)"
         />
       </div>
+      <select aria-label="Filtrar por músculo" [value]="muscleFilter()" (change)="muscleFilter.set($any($event.target).value)">
+        <option value="">Todos los músculos</option>
+        @for (region of muscleRegions; track region.name) {
+          <optgroup [label]="region.name">
+            @for (muscle of region.muscles; track muscle.code) {
+              <option [value]="muscle.code">{{ muscle.label }}</option>
+            }
+          </optgroup>
+        }
+      </select>
       <select aria-label="Filtrar por grupo muscular" [value]="groupFilter()" (change)="groupFilter.set($any($event.target).value)">
         <option value="">Todos los grupos</option>
         @for (group of groups(); track group) {
@@ -54,16 +64,26 @@
       <div class="exercise-grid">
         @for (exercise of filtered(); track exercise.id) {
           <article class="exercise-card">
-            <div class="exercise-card__icon"><app-icon name="dumbbell" [size]="19" /></div>
+            <app-exercise-thumb
+              [path]="apiPath(exercise.imagen_url)"
+              [version]="exercise.updated_at"
+              [name]="exercise.nombre"
+              [size]="72"
+            />
             <div class="exercise-card__body">
               <div class="exercise-card__title">
                 <h2>{{ exercise.nombre }}</h2>
                 <app-status-badge [label]="exercise.is_active ? 'Activo' : 'Inactivo'" [tone]="exercise.is_active ? 'success' : 'neutral'" />
               </div>
               <p>{{ exercise.descripcion || 'Sin descripción.' }}</p>
-              @if (exercise.grupo_muscular) {
-                <span class="tag">{{ humanize(exercise.grupo_muscular) }}</span>
-              }
+              <div class="exercise-card__tags">
+                @if (exercise.grupo_muscular) {
+                  <span class="tag">{{ humanize(exercise.grupo_muscular) }}</span>
+                }
+                @for (code of exercise.musculos; track code) {
+                  <span class="tag tag--muscle">{{ muscleLabel(code) }}</span>
+                }
+              </div>
             </div>
             <div class="exercise-card__actions">
               @if (auth.hasPermission('ejercicios:edit')) {
@@ -87,7 +107,8 @@
 <app-modal
   [open]="modalOpen()"
   [title]="editing() ? 'Editar ejercicio' : 'Nuevo ejercicio'"
-  subtitle="Un catálogo claro facilita la creación de planes."
+  subtitle="Agrega la imagen de referencia y marca los músculos que trabaja."
+  size="wide"
   (closed)="closeModal()"
 >
   @if (formError()) {
@@ -99,12 +120,52 @@
 
   <form [formGroup]="form" (ngSubmit)="save()" novalidate>
     <div class="form-grid">
-      <div class="field field--full">
+      <div class="field field--full" [class.has-error]="serverErrors()['nombre'] || (form.controls.nombre.touched && form.controls.nombre.invalid)">
         <label for="exercise-nombre">Nombre</label>
-        <input id="exercise-nombre" formControlName="nombre" placeholder="Ej. Sentadilla goblet" />
-        @if (form.controls.nombre.touched && form.controls.nombre.invalid) {
-          <p class="field-error">El nombre es obligatorio.</p>
+        @if (serverErrors()['nombre']; as mensaje) {
+          <p class="field-error" role="alert">{{ mensaje }}</p>
+        } @else if (form.controls.nombre.touched && form.controls.nombre.invalid) {
+          <p class="field-error" role="alert">El nombre es obligatorio.</p>
         }
+        <input id="exercise-nombre" formControlName="nombre" placeholder="Ej. Press de banca" />
+      </div>
+      <div class="field field--full" [class.has-error]="imageError() || serverErrors()['imagen']">
+        <label for="exercise-imagen">Imagen de referencia</label>
+        @if (imageError() || serverErrors()['imagen']; as mensaje) {
+          <p class="field-error" role="alert">{{ mensaje }}</p>
+        }
+        <div
+          class="image-drop"
+          (dragover)="$event.preventDefault()"
+          (drop)="onImageDropped($event)"
+        >
+          @if (imagePreview() || currentImage(); as url) {
+            <img class="image-drop__preview" [src]="url" alt="Vista previa de la imagen del ejercicio" />
+          } @else {
+            <div class="image-drop__empty">
+              <app-icon name="dumbbell" [size]="28" />
+            </div>
+          }
+          <div class="image-drop__text">
+            <strong>{{ imagePreview() || currentImage() ? 'Imagen lista' : 'Sube una foto del ejercicio' }}</strong>
+            <span>JPG, PNG o WebP de hasta 5 MB. Arrástrala aquí o elígela.</span>
+            <div class="image-drop__actions">
+              <label class="button button--secondary button--sm" for="exercise-imagen">
+                {{ imagePreview() || currentImage() ? 'Cambiar imagen' : 'Elegir imagen' }}
+              </label>
+              @if (imagePreview() || currentImage()) {
+                <button type="button" class="button button--ghost button--sm" (click)="clearImage()">Quitar</button>
+              }
+            </div>
+          </div>
+          <input
+            id="exercise-imagen"
+            class="visually-hidden"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            (change)="onImageSelected($event)"
+          />
+        </div>
       </div>
       <div class="field field--full">
         <label for="exercise-grupo">Grupo muscular</label>
@@ -113,6 +174,17 @@
       <div class="field field--full">
         <label for="exercise-descripcion">Descripción</label>
         <textarea id="exercise-descripcion" formControlName="descripcion" rows="3"></textarea>
+      </div>
+      <div class="field field--full" [class.has-error]="serverErrors()['musculos']">
+        <label>Músculos que trabaja</label>
+        @if (serverErrors()['musculos']; as mensaje) {
+          <p class="field-error" role="alert">{{ mensaje }}</p>
+        }
+        <app-muscle-picker
+          [compact]="true"
+          [selected]="selectedMuscles()"
+          (selectedChange)="selectedMuscles.set($event)"
+        />
       </div>
     </div>
 

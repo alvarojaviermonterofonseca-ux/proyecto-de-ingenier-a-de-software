@@ -60,87 +60,250 @@
     </button>
 
     <div class="login__box fade-in">
-      <div class="login__heading">
-        <span class="eyebrow">Acceso al panel</span>
-        <h2>Hola de nuevo</h2>
-        <p>Ingresa con la cuenta que te asignó tu administrador.</p>
-      </div>
-
-      @if (expired()) {
-        <div class="notice notice--warning" role="status">
-          <app-icon name="clock" [size]="18" />
-          <span>Tu sesión expiró. Inicia sesión para continuar.</span>
+      @if (mode() === 'login') {
+        <div class="login__heading">
+          <span class="eyebrow">Acceso al panel</span>
+          <h2>Hola de nuevo</h2>
+          <p>Ingresa con la cuenta que te asignó tu administrador.</p>
         </div>
-      }
 
-      @if (error()) {
-        <div class="notice notice--error" role="alert">
-          <app-icon name="alert" [size]="18" />
-          <span>{{ error() }}</span>
-        </div>
-      }
-
-      <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
-        <div class="field">
-          <label for="correo">Correo electrónico</label>
-          <div class="input-shell">
-            <app-icon name="mail" [size]="18" />
-            <input
-              id="correo"
-              type="email"
-              formControlName="correo"
-              autocomplete="email"
-              placeholder="nombre@correo.com"
-              [attr.aria-invalid]="form.controls.correo.touched && form.controls.correo.invalid"
-            />
+        @if (expired()) {
+          <div class="notice notice--warning" role="status">
+            <app-icon name="clock" [size]="18" />
+            <span>Tu sesión expiró. Inicia sesión para continuar.</span>
           </div>
-          @if (form.controls.correo.touched && form.controls.correo.hasError('required')) {
-            <p class="field-error">Ingresa tu correo.</p>
-          } @else if (form.controls.correo.touched && form.controls.correo.hasError('email')) {
-            <p class="field-error">Ingresa un correo válido.</p>
-          }
-        </div>
+        }
 
-        <div class="field">
-          <label for="contrasena">Contraseña</label>
-          <div class="input-shell">
-            <app-icon name="lock" [size]="18" />
-            <input
-              id="contrasena"
-              [type]="showPassword() ? 'text' : 'password'"
-              formControlName="contrasena"
-              autocomplete="current-password"
-              placeholder="Tu contraseña"
-              [attr.aria-invalid]="form.controls.contrasena.touched && form.controls.contrasena.invalid"
-            />
-            <button
-              class="password-toggle"
-              type="button"
-              (click)="togglePassword()"
-              [attr.aria-label]="showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
-            >
-              <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" [size]="18" />
-            </button>
+        @if (error()) {
+          <div class="notice notice--error" role="alert">
+            <app-icon name="alert" [size]="18" />
+            <span>{{ error() }}</span>
           </div>
-          @if (form.controls.contrasena.touched && form.controls.contrasena.hasError('required')) {
-            <p class="field-error">Ingresa tu contraseña.</p>
-          }
+        }
+
+        <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+          <div class="field">
+            <label for="correo">Correo electrónico</label>
+            <div class="input-shell">
+              <app-icon name="mail" [size]="18" />
+              <input
+                id="correo"
+                type="email"
+                formControlName="correo"
+                autocomplete="email"
+                placeholder="nombre@correo.com"
+                [attr.aria-invalid]="form.controls.correo.touched && form.controls.correo.invalid"
+              />
+            </div>
+            @if (form.controls.correo.touched && form.controls.correo.hasError('required')) {
+              <p class="field-error">Ingresa tu correo.</p>
+            } @else if (form.controls.correo.touched && form.controls.correo.hasError('email')) {
+              <p class="field-error">Ingresa un correo válido.</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="contrasena">Contraseña</label>
+            <div class="input-shell">
+              <app-icon name="lock" [size]="18" />
+              <input
+                id="contrasena"
+                [type]="showPassword() ? 'text' : 'password'"
+                formControlName="contrasena"
+                autocomplete="current-password"
+                placeholder="Tu contraseña"
+                [attr.aria-invalid]="form.controls.contrasena.touched && form.controls.contrasena.invalid"
+              />
+              <button
+                class="password-toggle"
+                type="button"
+                (click)="togglePassword()"
+                [attr.aria-label]="showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+              >
+                <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" [size]="18" />
+              </button>
+            </div>
+            @if (form.controls.contrasena.touched && form.controls.contrasena.hasError('required')) {
+              <p class="field-error">Ingresa tu contraseña.</p>
+            }
+          </div>
+
+          <button class="button button--primary submit" type="submit" [disabled]="loading()">
+            @if (loading()) {
+              <span class="spinner spinner--small"></span>
+              Verificando...
+            } @else {
+              Entrar al panel
+              <app-icon name="arrow-right" [size]="18" />
+            }
+          </button>
+        </form>
+
+        <div class="login__switch">
+          <span>¿Aún no tienes cuenta?</span>
+          <button class="button button--secondary login__switch-button" type="button" (click)="openRegister()">
+            <app-icon name="user-plus" [size]="17" />
+            Crear cuenta
+          </button>
         </div>
 
-        <button class="button button--primary submit" type="submit" [disabled]="loading()">
-          @if (loading()) {
-            <span class="spinner spinner--small"></span>
-            Verificando...
-          } @else {
-            Entrar al panel
-            <app-icon name="arrow-right" [size]="18" />
-          }
-        </button>
-      </form>
+        <p class="login__support">
+          ¿Olvidaste tu contraseña? Contacta al administrador del gimnasio.
+        </p>
+      } @else {
+        <div class="login__heading">
+          <span class="eyebrow">Registro de clientes</span>
+          <h2>Crea tu cuenta</h2>
+          <p>Regístrate para entrenar con nosotros y seguir tu progreso.</p>
+        </div>
 
-      <p class="login__support">
-        ¿Olvidaste tu contraseña? Contacta al administrador del gimnasio.
-      </p>
+        @if (registerError()) {
+          <div class="notice notice--error" role="alert">
+            <app-icon name="alert" [size]="18" />
+            <span>{{ registerError() }}</span>
+          </div>
+        }
+
+        <form class="register-form" [formGroup]="registerForm" (ngSubmit)="submitRegister()" novalidate>
+          <div class="field">
+            <label for="registro-nombre">Nombre completo</label>
+            <div class="input-shell">
+              <app-icon name="user" [size]="18" />
+              <input
+                id="registro-nombre"
+                type="text"
+                formControlName="nombre"
+                autocomplete="name"
+                placeholder="Tu nombre"
+                [attr.aria-invalid]="registerForm.controls.nombre.touched && registerForm.controls.nombre.invalid"
+              />
+            </div>
+            @if (registerForm.controls.nombre.touched && registerForm.controls.nombre.hasError('required')) {
+              <p class="field-error">Ingresa tu nombre.</p>
+            } @else if (registerForm.controls.nombre.touched && registerForm.controls.nombre.hasError('minlength')) {
+              <p class="field-error">Usa al menos 2 caracteres.</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="registro-correo">Correo electrónico</label>
+            <div class="input-shell">
+              <app-icon name="mail" [size]="18" />
+              <input
+                id="registro-correo"
+                type="email"
+                formControlName="correo"
+                autocomplete="email"
+                placeholder="nombre@correo.com"
+                [attr.aria-invalid]="registerForm.controls.correo.touched && registerForm.controls.correo.invalid"
+              />
+            </div>
+            @if (registerForm.controls.correo.touched && registerForm.controls.correo.hasError('required')) {
+              <p class="field-error">Ingresa tu correo.</p>
+            } @else if (registerForm.controls.correo.touched && registerForm.controls.correo.hasError('email')) {
+              <p class="field-error">Ingresa un correo válido.</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="registro-telefono">Teléfono <span class="field-optional">(opcional)</span></label>
+            <div class="input-shell">
+              <app-icon name="phone" [size]="18" />
+              <input
+                id="registro-telefono"
+                type="tel"
+                formControlName="telefono"
+                autocomplete="tel"
+                maxlength="30"
+                placeholder="Tu número de contacto"
+              />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="registro-gimnasio">Código de tu gimnasio</label>
+            <div class="input-shell">
+              <app-icon name="dumbbell" [size]="18" />
+              <input
+                id="registro-gimnasio"
+                type="text"
+                formControlName="gimnasio"
+                autocomplete="off"
+                autocapitalize="none"
+                maxlength="50"
+                placeholder="Pídelo en la recepción de tu gimnasio"
+                aria-describedby="registro-gimnasio-ayuda"
+              />
+            </div>
+            <p class="field-hint" id="registro-gimnasio-ayuda">
+              Te une al gimnasio correcto. Si la plataforma tiene un solo gimnasio, puedes dejarlo vacío.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="registro-contrasena">Contraseña</label>
+            <div class="input-shell">
+              <app-icon name="lock" [size]="18" />
+              <input
+                id="registro-contrasena"
+                [type]="showRegisterPassword() ? 'text' : 'password'"
+                formControlName="contrasena"
+                autocomplete="new-password"
+                placeholder="Al menos 8 caracteres"
+                [attr.aria-invalid]="registerForm.controls.contrasena.touched && registerForm.controls.contrasena.invalid"
+              />
+              <button
+                class="password-toggle"
+                type="button"
+                (click)="toggleRegisterPassword()"
+                [attr.aria-label]="showRegisterPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+              >
+                <app-icon [name]="showRegisterPassword() ? 'eye-off' : 'eye'" [size]="18" />
+              </button>
+            </div>
+            @if (registerForm.controls.contrasena.touched && registerForm.controls.contrasena.hasError('required')) {
+              <p class="field-error">Crea una contraseña.</p>
+            } @else if (registerForm.controls.contrasena.touched && registerForm.controls.contrasena.hasError('minlength')) {
+              <p class="field-error">Usa al menos 8 caracteres.</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="registro-confirmar">Confirma tu contraseña</label>
+            <div class="input-shell">
+              <app-icon name="lock" [size]="18" />
+              <input
+                id="registro-confirmar"
+                [type]="showRegisterPassword() ? 'text' : 'password'"
+                formControlName="confirmar"
+                autocomplete="new-password"
+                placeholder="Repite tu contraseña"
+                [attr.aria-invalid]="registerForm.controls.confirmar.touched && (registerForm.controls.confirmar.invalid || registerForm.hasError('passwordsMismatch'))"
+              />
+            </div>
+            @if (registerForm.controls.confirmar.touched && registerForm.controls.confirmar.hasError('required')) {
+              <p class="field-error">Repite tu contraseña.</p>
+            } @else if (registerForm.controls.confirmar.touched && registerForm.hasError('passwordsMismatch')) {
+              <p class="field-error">Las contraseñas no coinciden.</p>
+            }
+          </div>
+
+          <button class="button button--primary submit" type="submit" [disabled]="registering()">
+            @if (registering()) {
+              <span class="spinner spinner--small"></span>
+              Creando cuenta...
+            } @else {
+              Crear mi cuenta
+              <app-icon name="arrow-right" [size]="18" />
+            }
+          </button>
+        </form>
+
+        <p class="login__support">
+          ¿Ya tienes una cuenta?
+          <button class="login__link" type="button" (click)="openLogin()">Inicia sesión</button>
+        </p>
+      }
     </div>
 
     <p class="login__footer">Gym Control Pro · Gestión integral del gimnasio</p>

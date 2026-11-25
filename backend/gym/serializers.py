@@ -4,13 +4,15 @@ Las contraseñas se reciben exclusivamente como ``contrasena`` y se convierten
 en un hash; ``contrasena_hash`` nunca forma parte de una respuesta JSON.
 """
 
+import json
 from copy import copy
 
 from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import FieldDoesNotExist
+from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from django.urls import reverse
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException
@@ -19,8 +21,11 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 
 from .models import (
+    validar_musculos,
     Administrador,
+    Alerta,
     Asistencia,
+    CategoriaGasto,
     Cliente,
     ClienteEntrenador,
     ClienteTerapeuta,
@@ -29,7 +34,12 @@ from .models import (
     Entrenador,
     Entrenamiento,
     EventoAuditoria,
+    Gasto,
+    Gimnasio,
+    Membresia,
+    MetodoPago,
     Notificacion,
+    Pago,
     Permiso,
     PlanAlimentacion,
     PlanEntrenamiento,
@@ -44,6 +54,7 @@ from .models import (
     normalizar_correo,
 )
 from .permissions import es_administrador
+from .tenancy import es_plataforma, filtrar_por_gimnasio, gimnasio_id_de
 
 
 class SerializerVacio(serializers.Serializer):
@@ -71,6 +82,9 @@ class RolesUsuarioPayloadSerializer(serializers.Serializer):
     roles = serializers.ListField(
         child=serializers.IntegerField(min_value=1), allow_empty=True
     )
+    rol_principal = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True
+    )
 
 
 class LoginFailed(APIException):
@@ -85,6 +99,50 @@ class SeguridadEscrituraMixin:
     def _actor(self):
         request = self.context.get("request")
         return getattr(request, "user", None)
+
+    def get_fields(self):
+        """Limita toda clave foránea escribible al gimnasio del actor.
+
+        Así un id de otro gimnasio responde "no existe" (400) en cualquier
+        recurso, sin depender de que cada vista lo valide por su cuenta.
+        """
+        fields = super().get_fields()
+        for nombre, campo in fields.items():
+            # El mensaje de unicidad de Django en español es genérico
+            # ("Ya existe un/a usuario con este/a correo."); se reemplaza.
+            for validador in getattr(campo, "validators", []):
+                mensaje = getattr(validador, "message", "")
+                if isinstance(mensaje, str) and "un/a" in mensaje:
+                    validador.message = MENSAJES_UNICOS.get(
+                        nombre, "Ya existe un registro con este valor."
+                    )
+        actor = self._actor()
+        if actor is None or not getattr(actor, "is_authenticated", False):
+            return fields
+        for campo in fields.values():
+            relacion = getattr(campo, "child_relation", campo)
+            queryset = getattr(relacion, "queryset", None)
+            if queryset is None or getattr(relacion, "read_only", False):
+                continue
+            try:
+                relacion.queryset = filtrar_por_gimnasio(queryset, actor)
+            except ImproperlyConfigured:
+                raise
+        return fields
+
+    def _gimnasio_para_alta(self):
+        """Gimnasio de un registro nuevo: siempre el del actor autenticado."""
+        actor = self._actor()
+        gimnasio_id = gimnasio_id_de(actor)
+        if gimnasio_id:
+            return gimnasio_id
+        if es_plataforma(actor):
+            gimnasio_id = Gimnasio.unico_activo_id()
+            if gimnasio_id:
+                return gimnasio_id
+        raise serializers.ValidationError(
+            {"gimnasio": "No se pudo determinar el gimnasio del registro."}
+        )
 
     def _validar_campos_sensibles(self, attrs):
         if "is_active" in attrs and not es_administrador(self._actor()):
@@ -135,11 +193,33 @@ class ModeloValidadoSerializer(SeguridadEscrituraMixin, serializers.ModelSeriali
         for atributo, valor in attrs.items():
             setattr(candidato, atributo, valor)
 
+        if self.instance is None and hasattr(candidato, "asignar_gimnasio"):
+            # Si el registro cuelga de un cliente, hereda su gimnasio; si no,
+            # toma el del actor. Nunca se lee de la solicitud.
+            candidato.asignar_gimnasio(self._actor())
+            if not candidato.gimnasio_id:
+                candidato.gimnasio_id = self._gimnasio_para_alta()
+            attrs["gimnasio_id"] = candidato.gimnasio_id
+
         try:
             candidato.full_clean()
         except DjangoValidationError as error:
             raise serializers.ValidationError(error.message_dict) from error
         return attrs
+
+
+class RegistradoPorActorMixin:
+    """``registrado_por`` es siempre quien hace la petición, nunca un dato del cliente."""
+
+    def validate(self, attrs):
+        if self.instance is None:
+            actor = self._actor()
+            if not isinstance(actor, Usuario):
+                raise serializers.ValidationError(
+                    {"registrado_por": "Esta operación requiere un usuario propio del gimnasio."}
+                )
+            attrs["registrado_por"] = actor
+        return super().validate(attrs)
 
 
 class PermisoSerializer(ModeloValidadoSerializer):
@@ -181,6 +261,7 @@ class PermisoSerializer(ModeloValidadoSerializer):
 
 
 class RolSerializer(ModeloValidadoSerializer):
+    es_del_sistema = serializers.BooleanField(read_only=True)
     permisos = serializers.SerializerMethodField()
     permisos_detalle = serializers.SerializerMethodField()
     recursos = serializers.SerializerMethodField()
@@ -193,6 +274,7 @@ class RolSerializer(ModeloValidadoSerializer):
             "nombre",
             "descripcion",
             "is_active",
+            "es_del_sistema",
             "created_at",
             "updated_at",
             "permisos",
@@ -202,6 +284,7 @@ class RolSerializer(ModeloValidadoSerializer):
         )
         read_only_fields = (
             "id",
+            "es_del_sistema",
             "created_at",
             "updated_at",
             "permisos",
@@ -210,29 +293,52 @@ class RolSerializer(ModeloValidadoSerializer):
             "total_usuarios",
         )
 
+    def _gimnasio_id(self):
+        """Gimnasio cuya matriz se muestra: el indicado o el del actor."""
+        if "gimnasio_id" in self.context:
+            return self.context["gimnasio_id"]
+        return gimnasio_id_de(self._actor())
+
+    def _asignaciones(self, rol, relacion):
+        gimnasio_id = self._gimnasio_id()
+        return [
+            asignacion
+            for asignacion in getattr(rol, relacion).all()
+            if asignacion.gimnasio_id == gimnasio_id
+        ]
+
+    def _permisos_activos(self, rol):
+        permisos = [
+            asignacion.permiso
+            for asignacion in self._asignaciones(rol, "permisos_asignados")
+            if asignacion.permiso.is_active
+        ]
+        permisos.sort(key=lambda permiso: permiso.codigo)
+        return permisos
+
     @extend_schema_field({"type": "array", "items": {"type": "string"}})
     def get_permisos(self, rol):
-        return sorted(
-            rol.permisos_asignados.filter(permiso__is_active=True).values_list("permiso__codigo", flat=True)
-        )
+        return [permiso.codigo for permiso in self._permisos_activos(rol)]
 
     @extend_schema_field(PermisoSerializer(many=True))
     def get_permisos_detalle(self, rol):
-        permisos = [asignacion.permiso for asignacion in rol.permisos_asignados.all() if asignacion.permiso.is_active]
-        permisos.sort(key=lambda permiso: permiso.codigo)
-        return PermisoSerializer(permisos, many=True).data
+        return PermisoSerializer(self._permisos_activos(rol), many=True).data
 
     @extend_schema_field({"type": "array", "items": {"type": "string"}})
     def get_recursos(self, rol):
         return sorted(
             asignacion.recurso.nombre
-            for asignacion in rol.recursos_asignados.all()
+            for asignacion in self._asignaciones(rol, "recursos_asignados")
             if asignacion.recurso.is_active
         )
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_total_usuarios(self, rol):
-        return rol.asignaciones_usuarios.filter(activo=True).values("usuario_id").distinct().count()
+        asignaciones = rol.asignaciones_usuarios.filter(activo=True)
+        gimnasio_id = self._gimnasio_id()
+        if gimnasio_id:
+            asignaciones = asignaciones.filter(usuario__gimnasio_id=gimnasio_id)
+        return asignaciones.values("usuario_id").distinct().count()
 
 
 class RolPermisoSerializer(ModeloValidadoSerializer):
@@ -721,7 +827,7 @@ class UsuarioRolesMixin:
         if "roles_asignados" not in attrs:
             return
         ids = list(dict.fromkeys(attrs["roles_asignados"]))
-        roles = list(Rol.objects.filter(pk__in=ids))
+        roles = list(filtrar_por_gimnasio(Rol.objects.filter(pk__in=ids), self._actor()))
         if len(roles) != len(ids):
             raise serializers.ValidationError(
                 {"roles_asignados": "Uno o más roles no existen."}
@@ -740,19 +846,46 @@ def validar_contrasena_django(contrasena, candidato):
     try:
         validate_password(contrasena, candidato)
     except DjangoValidationError as error:
-        raise serializers.ValidationError(
-            {"contrasena": list(error.messages)}
-        ) from error
+        # Django nombra los atributos internos (first_name, email); se
+        # traducen a los campos que el usuario ve en el formulario.
+        nombres = {
+            " a first_name": " al nombre",
+            " a email": " al correo",
+            " a username": " al nombre de usuario",
+            "first_name": "el nombre",
+            "email": "el correo",
+            "username": "el nombre de usuario",
+        }
+        mensajes = []
+        for mensaje in error.messages:
+            for interno, visible in nombres.items():
+                mensaje = mensaje.replace(interno, visible)
+            mensajes.append(mensaje)
+        raise serializers.ValidationError({"contrasena": mensajes}) from error
+
+
+MENSAJES_UNICOS = {
+    "correo": "Ya existe un usuario con este correo.",
+    "username": "Ya existe un usuario con este nombre de usuario.",
+}
 
 
 def validar_modelo(candidato):
     try:
         candidato.full_clean()
     except DjangoValidationError as error:
-        raise serializers.ValidationError(error.message_dict) from error
+        errores = {}
+        for campo, mensajes in error.message_dict.items():
+            # El mensaje de unicidad de Django en español es genérico
+            # ("Ya existe un/a usuario con este/a correo."); se reemplaza.
+            errores[campo] = [
+                MENSAJES_UNICOS.get(campo, mensaje) if "Ya existe un/a" in mensaje else mensaje
+                for mensaje in mensajes
+            ]
+        raise serializers.ValidationError(errores) from error
 
 
-def administradores_efectivos_activos(excluir_pk=None):
+def administradores_efectivos_activos(excluir_pk=None, gimnasio_id=None):
     """Cuenta administradores por rol principal o por rol adicional activo."""
 
     queryset = (
@@ -769,11 +902,16 @@ def administradores_efectivos_activos(excluir_pk=None):
     )
     if excluir_pk is not None:
         queryset = queryset.exclude(pk=excluir_pk)
+    if gimnasio_id is not None:
+        queryset = queryset.filter(gimnasio_id=gimnasio_id)
     return queryset
 
 
 def existe_otro_administrador_activo(usuario):
-    return administradores_efectivos_activos(excluir_pk=usuario.pk).exists()
+    """Cada gimnasio debe conservar al menos un administrador activo."""
+    return administradores_efectivos_activos(
+        excluir_pk=usuario.pk, gimnasio_id=usuario.gimnasio_id
+    ).exists()
 
 
 class PerfilResumenMixin:
@@ -795,10 +933,56 @@ class PerfilResumenMixin:
         return serializer_clase(perfil, context=self.context).data
 
 
+class GimnasioConfiguracionSerializer(serializers.ModelSerializer):
+    """Datos y umbrales de alertas del gimnasio del usuario autenticado.
+
+    El código (usado en el registro público) y el estado solo los cambia el
+    personal de la plataforma.
+    """
+
+    class Meta:
+        model = Gimnasio
+        fields = (
+            "id",
+            "nombre",
+            "codigo",
+            "nit",
+            "ciudad",
+            "direccion",
+            "telefono",
+            "correo",
+            "dias_inactividad_alerta",
+            "limite_gastos_mensual",
+            "porcentaje_caida_ingresos",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "codigo", "is_active", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        candidato = copy(self.instance)
+        for atributo, valor in attrs.items():
+            setattr(candidato, atributo, valor)
+        try:
+            candidato.full_clean()
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.message_dict) from error
+        return attrs
+
+
+class GimnasioResumenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Gimnasio
+        fields = ("id", "nombre", "codigo", "ciudad")
+        read_only_fields = fields
+
+
 class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
     """DTO de detalle: identidad pública, roles y perfil resumido."""
 
-    rol_detalle = RolSerializer(source="rol", read_only=True)
+    gimnasio = GimnasioResumenSerializer(read_only=True)
+    rol_detalle = serializers.SerializerMethodField(read_only=True)
     roles_detalle = serializers.SerializerMethodField(read_only=True)
     permisos = serializers.SerializerMethodField(read_only=True)
     perfil_detalle = serializers.SerializerMethodField(read_only=True)
@@ -808,6 +992,7 @@ class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
         model = Usuario
         fields = (
             "id",
+            "gimnasio",
             "rol",
             "rol_detalle",
             "roles_detalle",
@@ -824,10 +1009,17 @@ class UsuarioReadSerializer(PerfilResumenMixin, serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    def _contexto_gimnasio(self, usuario):
+        return {**self.context, "gimnasio_id": usuario.gimnasio_id}
+
+    @extend_schema_field(RolSerializer)
+    def get_rol_detalle(self, usuario):
+        return RolSerializer(usuario.rol, context=self._contexto_gimnasio(usuario)).data
+
     @extend_schema_field(RolSerializer(many=True))
     def get_roles_detalle(self, usuario):
         return RolSerializer(
-            usuario.roles_efectivos(), many=True, context=self.context
+            usuario.roles_efectivos(), many=True, context=self._contexto_gimnasio(usuario)
         ).data
 
     @extend_schema_field({"type": "array", "items": {"type": "string"}})
@@ -925,6 +1117,31 @@ class UsuarioCreateSerializer(
             "perfil",
         )
 
+    def to_internal_value(self, data):
+        """Devuelve juntos los errores de campo y los de la contraseña.
+
+        DRF corta en el primer campo inválido y no llega a ``validate()``,
+        así que la contraseña débil se informaría en un segundo intento. Aquí
+        se evalúa también cuando otro campo falla, para mostrar todo de una vez.
+        """
+        try:
+            return super().to_internal_value(data)
+        except serializers.ValidationError as error:
+            errores = dict(error.detail) if isinstance(error.detail, dict) else {}
+            contrasena = data.get("contrasena") if hasattr(data, "get") else None
+            if errores and isinstance(contrasena, str) and "contrasena" not in errores:
+                candidato = Usuario(
+                    nombre=str(data.get("nombre") or ""),
+                    correo=str(data.get("correo") or ""),
+                    username=data.get("username") or None,
+                )
+                try:
+                    validar_contrasena_django(contrasena, candidato)
+                except serializers.ValidationError as error_contrasena:
+                    errores.update(error_contrasena.detail)
+                    raise serializers.ValidationError(errores) from error
+            raise
+
     def validate(self, attrs):
         actor_admin = es_administrador(self._actor())
         self._validar_campos_sensibles(attrs)
@@ -970,6 +1187,7 @@ class UsuarioCreateSerializer(
 
         # ``contrasena``, ``perfil`` y ``roles_asignados`` no son columnas del
         # modelo, por ello se excluyen de la validación genérica.
+        attrs["gimnasio_id"] = self._gimnasio_para_alta()
         datos_modelo = {
             clave: valor
             for clave, valor in attrs.items()
@@ -1136,18 +1354,121 @@ class UsuarioUpdateSerializer(
         return instance
 
 
+class RegistroPublicoSerializer(serializers.Serializer):
+    """Alta pública de una cuenta de cliente.
+
+    El rol y el estado se fijan en el servidor: el cuerpo de la solicitud no
+    puede escalar privilegios ni crear cuentas inactivas.
+    """
+
+    nombre = serializers.CharField(max_length=150)
+    correo = serializers.EmailField(max_length=191)
+    contrasena = serializers.CharField(
+        write_only=True, min_length=8, trim_whitespace=False
+    )
+    telefono = serializers.CharField(
+        max_length=30, required=False, allow_blank=True, allow_null=True
+    )
+    fecha_nacimiento = serializers.DateField(required=False, allow_null=True)
+    objetivo = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, allow_null=True
+    )
+    gimnasio = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        help_text="Código del gimnasio. Opcional si la plataforma tiene uno solo.",
+    )
+
+    def validate_gimnasio(self, codigo):
+        codigo = (codigo or "").strip().lower()
+        activos = Gimnasio.objects.filter(is_active=True, deleted_at__isnull=True)
+        if codigo:
+            gimnasio = activos.filter(codigo=codigo).first()
+            if gimnasio is None:
+                raise serializers.ValidationError(
+                    "No hay un gimnasio activo con ese código."
+                )
+            return gimnasio
+        return None
+
+    def validate_correo(self, correo):
+        correo = normalizar_correo(correo)
+        if Usuario.objects.filter(correo=correo).exists():
+            raise serializers.ValidationError(
+                "Ya existe una cuenta registrada con este correo."
+            )
+        return correo
+
+    def validate(self, attrs):
+        rol = Rol.objects.filter(
+            nombre=Rol.Nombre.CLIENTE, is_active=True
+        ).first()
+        if rol is None:
+            raise serializers.ValidationError(
+                "El registro público no está disponible en este momento."
+            )
+
+        gimnasio = attrs.get("gimnasio")
+        if gimnasio is None:
+            unico_id = Gimnasio.unico_activo_id()
+            gimnasio = Gimnasio.objects.filter(pk=unico_id).first() if unico_id else None
+        if gimnasio is None:
+            raise serializers.ValidationError(
+                {"gimnasio": "Indique el código de su gimnasio para registrarse."}
+            )
+        attrs["gimnasio"] = gimnasio
+
+        contrasena = attrs["contrasena"]
+        candidato = Usuario(
+            gimnasio=gimnasio,
+            rol=rol,
+            nombre=attrs["nombre"],
+            correo=attrs["correo"],
+            telefono=attrs.get("telefono"),
+        )
+        candidato.set_password(contrasena)
+        validar_modelo(candidato)
+        validar_contrasena_django(contrasena, candidato)
+
+        attrs["rol"] = rol
+        return attrs
+
+    def create(self, validated_data):
+        contrasena = validated_data.pop("contrasena")
+        rol = validated_data.pop("rol")
+        gimnasio = validated_data.pop("gimnasio")
+        datos_perfil = {
+            clave: validated_data.pop(clave)
+            for clave in ("fecha_nacimiento", "objetivo")
+            if clave in validated_data
+        }
+
+        with transaction.atomic():
+            usuario = Usuario(**validated_data, rol=rol, gimnasio=gimnasio)
+            usuario.set_password(contrasena)
+            usuario.save()
+
+            perfil = Cliente(usuario=usuario, **datos_perfil)
+            validar_modelo(perfil)
+            perfil.save()
+        return usuario
+
+
 class LoginSerializer(serializers.Serializer):
     correo = serializers.EmailField()
     contrasena = serializers.CharField(trim_whitespace=False, write_only=True)
 
     def validate(self, attrs):
         usuario = (
-            Usuario.objects.select_related("rol")
+            Usuario.objects.select_related("rol", "gimnasio")
             .filter(
                 correo=normalizar_correo(attrs["correo"]),
                 is_active=True,
                 deleted_at__isnull=True,
                 rol__is_active=True,
+                gimnasio__is_active=True,
+                gimnasio__deleted_at__isnull=True,
             )
             .first()
         )
@@ -1218,10 +1539,80 @@ class EntrenamientoSerializer(ModeloValidadoSerializer):
 
 
 class EjercicioSerializer(ModeloValidadoSerializer):
+    """Ejercicio del catálogo con músculos e imagen de referencia privada.
+
+    La imagen se sube como ``multipart`` en ``imagen``; enviar ``imagen`` vacío
+    o ``quitar_imagen=true`` la elimina. Se lee por ``imagen_url``.
+    """
+
+    imagen = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    quitar_imagen = serializers.BooleanField(write_only=True, required=False, default=False)
+    imagen_url = serializers.SerializerMethodField()
+    musculos = serializers.JSONField(required=False)
+
     class Meta:
         model = Ejercicio
-        fields = ("id", "nombre", "descripcion", "grupo_muscular", "is_active", "created_at", "updated_at")
+        fields = (
+            "id", "nombre", "descripcion", "grupo_muscular", "musculos", "imagen", "quitar_imagen",
+            "imagen_url", "is_active", "created_at", "updated_at",
+        )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        # En multipart un booleano ausente valdría False (regla de formularios
+        # HTML); así ``is_active`` no se desactiva al subir solo una imagen.
+        for nombre in ("is_active", "quitar_imagen"):
+            if nombre in fields:
+                fields[nombre].default_empty_html = serializers.empty
+        return fields
+
+    def to_internal_value(self, data):
+        # En multipart la lista de músculos llega como texto JSON o repetida.
+        if hasattr(data, "getlist") and "musculos" in data:
+            valores = data.getlist("musculos")
+            datos = data.copy()
+            if len(valores) == 1 and str(valores[0]).strip().startswith("["):
+                datos["musculos"] = valores[0]
+            else:
+                datos.setlist("musculos", [])
+                datos["musculos"] = json.dumps([v for v in valores if v])
+            data = datos
+        return super().to_internal_value(data)
+
+    def validate_musculos(self, valor):
+        if isinstance(valor, str):
+            try:
+                valor = json.loads(valor) if valor.strip() else []
+            except ValueError as error:
+                raise serializers.ValidationError("Envíe una lista de músculos.") from error
+        try:
+            validar_musculos(valor or [])
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
+        return valor or []
+
+    def validate(self, attrs):
+        if attrs.pop("quitar_imagen", False):
+            attrs["imagen"] = None
+        return super().validate(attrs)
+
+    def update(self, instance, validated_data):
+        anterior = instance.imagen.name if instance.imagen else None
+        instance = super().update(instance, validated_data)
+        nueva = instance.imagen.name if instance.imagen else None
+        if anterior and anterior != nueva:
+            # No deja archivos huérfanos al reemplazar o quitar la imagen.
+            instance.imagen.storage.delete(anterior)
+        return instance
+
+    @extend_schema_field({"type": "string", "format": "uri", "nullable": True})
+    def get_imagen_url(self, ejercicio):
+        if not ejercicio.imagen:
+            return None
+        ruta = reverse("gym:ejercicio-imagen", args=[ejercicio.pk])
+        request = self.context.get("request")
+        return request.build_absolute_uri(ruta) if request else ruta
 
 
 class PlanEntrenamientoSerializer(ModeloValidadoSerializer):
@@ -1232,13 +1623,14 @@ class PlanEntrenamientoSerializer(ModeloValidadoSerializer):
         model = PlanEntrenamiento
         fields = (
             "id", "cliente", "cliente_detalle", "entrenador", "entrenador_detalle", "nombre", "objetivo",
-            "fecha_inicio", "fecha_fin", "activo", "observaciones", "is_active", "created_at", "updated_at",
+            "fecha_inicio", "fecha_fin", "activo", "observaciones", "rutina", "is_active", "created_at",
+            "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
 
 class PlanEntrenamientoEjercicioSerializer(ModeloValidadoSerializer):
-    ejercicio_detalle = EjercicioSerializer(source="ejercicio", read_only=True)
+    ejercicio_detalle = serializers.SerializerMethodField()
 
     class Meta:
         model = PlanEntrenamientoEjercicio
@@ -1247,6 +1639,17 @@ class PlanEntrenamientoEjercicioSerializer(ModeloValidadoSerializer):
             "descanso_segundos", "observaciones", "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    @extend_schema_field(EjercicioSerializer)
+    def get_ejercicio_detalle(self, fila):
+        datos = EjercicioSerializer(fila.ejercicio, context=self.context).data
+        if fila.ejercicio.imagen:
+            # El cliente no tiene acceso al catálogo de ejercicios; ve la
+            # imagen a través de la fila de su propio plan.
+            ruta = reverse("gym:plan-entrenamiento-ejercicio-imagen", args=[fila.pk])
+            request = self.context.get("request")
+            datos["imagen_url"] = request.build_absolute_uri(ruta) if request else ruta
+        return datos
 
 
 class PlanAlimentacionSerializer(ModeloValidadoSerializer):
@@ -1440,3 +1843,245 @@ class PerfilActualPasswordSerializer(serializers.Serializer):
                 {"contrasena_nueva": list(error.messages)}
             ) from error
         return attrs
+
+
+# =============================================================================
+# SERIALIZERS FINANCIEROS
+# =============================================================================
+
+class MetodoPagoSerializer(ModeloValidadoSerializer):
+    class Meta:
+        model = MetodoPago
+        fields = (
+            "id",
+            "nombre",
+            "tipo",
+            "descripcion",
+            "is_active",
+            "requiere_referencia",
+            "orden",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class CategoriaGastoSerializer(ModeloValidadoSerializer):
+    class Meta:
+        model = CategoriaGasto
+        fields = (
+            "id",
+            "nombre",
+            "tipo",
+            "descripcion",
+            "is_active",
+            "color",
+            "orden",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class PagoSerializer(RegistradoPorActorMixin, ModeloValidadoSerializer):
+    cliente_detalle = ClienteResumenSerializer(source="cliente", read_only=True)
+    metodo_pago_detalle = MetodoPagoSerializer(source="metodo_pago", read_only=True)
+    membresia_detalle = serializers.SerializerMethodField()
+    registrado_por_detalle = UsuarioResumenSerializer(source="registrado_por", read_only=True)
+
+    class Meta:
+        model = Pago
+        fields = (
+            "id",
+            "cliente",
+            "cliente_detalle",
+            "concepto",
+            "concepto_detalle",
+            "membresia",
+            "membresia_detalle",
+            "fecha_pago",
+            "valor",
+            "metodo_pago",
+            "metodo_pago_detalle",
+            "referencia",
+            "estado",
+            "registrado_por",
+            "registrado_por_detalle",
+            "notas",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        )
+        read_only_fields = ("id", "registrado_por", "created_at", "updated_at", "deleted_at")
+
+    def get_membresia_detalle(self, pago):
+        if not pago.membresia:
+            return None
+        return {
+            "id": pago.membresia.id,
+            "nombre": pago.membresia.nombre,
+            "tipo": pago.membresia.tipo,
+            "estado": pago.membresia.estado,
+        }
+
+
+class GastoSerializer(RegistradoPorActorMixin, ModeloValidadoSerializer):
+    categoria_detalle = CategoriaGastoSerializer(source="categoria", read_only=True)
+    metodo_pago_detalle = MetodoPagoSerializer(source="metodo_pago", read_only=True)
+    registrado_por_detalle = UsuarioResumenSerializer(source="registrado_por", read_only=True)
+    aprobado_por_detalle = UsuarioResumenSerializer(source="aprobado_por", read_only=True)
+
+    class Meta:
+        model = Gasto
+        fields = (
+            "id",
+            "descripcion",
+            "categoria",
+            "categoria_detalle",
+            "valor",
+            "fecha",
+            "metodo_pago",
+            "metodo_pago_detalle",
+            "referencia",
+            "estado",
+            "registrado_por",
+            "registrado_por_detalle",
+            "aprobado_por",
+            "aprobado_por_detalle",
+            "fecha_aprobacion",
+            "observaciones",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        )
+        read_only_fields = (
+            "id",
+            "registrado_por",
+            "aprobado_por",
+            "fecha_aprobacion",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        )
+
+    def validate(self, attrs):
+        # Quien pasa el gasto a aprobado o pagado queda como aprobador; el
+        # cliente no puede declarar a otra persona.
+        estado = attrs.get("estado") or getattr(self.instance, "estado", None)
+        ya_aprobado = self.instance is not None and self.instance.aprobado_por_id
+        if estado in (Gasto.Estado.APROBADO, Gasto.Estado.PAGADO) and not ya_aprobado:
+            actor = self._actor()
+            if isinstance(actor, Usuario):
+                attrs["aprobado_por"] = actor
+                attrs["fecha_aprobacion"] = timezone.now()
+        return super().validate(attrs)
+
+
+class MembresiaSerializer(RegistradoPorActorMixin, ModeloValidadoSerializer):
+    cliente_detalle = ClienteResumenSerializer(source="cliente", read_only=True)
+    entrenador_detalle = EntrenadorResumenSerializer(source="entrenador_asignado", read_only=True)
+    registrado_por_detalle = UsuarioResumenSerializer(source="registrado_por", read_only=True)
+    dias_para_vencer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Membresia
+        fields = (
+            "id",
+            "cliente",
+            "cliente_detalle",
+            "tipo",
+            "nombre",
+            "precio",
+            "fecha_inicio",
+            "fecha_fin",
+            "fecha_ultima_renovacion",
+            "estado",
+            "dias_congelados",
+            "renovacion_automatica",
+            "entrenador_asignado",
+            "entrenador_detalle",
+            "registrado_por",
+            "registrado_por_detalle",
+            "observaciones",
+            "dias_para_vencer",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        )
+        read_only_fields = (
+            "id",
+            "registrado_por",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "dias_para_vencer",
+        )
+
+    def get_dias_para_vencer(self, membresia):
+        return membresia.dias_para_vencer()
+
+
+class AlertaSerializer(ModeloValidadoSerializer):
+    cliente_detalle = ClienteResumenSerializer(source="cliente", read_only=True)
+    membresia_detalle = serializers.SerializerMethodField()
+    pago_detalle = serializers.SerializerMethodField()
+    gasto_detalle = serializers.SerializerMethodField()
+    leida_por_detalle = UsuarioResumenSerializer(source="leida_por", read_only=True)
+
+    class Meta:
+        model = Alerta
+        fields = (
+            "id",
+            "tipo",
+            "prioridad",
+            "titulo",
+            "mensaje",
+            "cliente",
+            "cliente_detalle",
+            "membresia",
+            "membresia_detalle",
+            "pago",
+            "pago_detalle",
+            "gasto",
+            "gasto_detalle",
+            "leida",
+            "leida_por",
+            "leida_por_detalle",
+            "leida_at",
+            "datos_adicionales",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        )
+        read_only_fields = ("id", "leida", "leida_por", "leida_at", "created_at", "updated_at", "deleted_at")
+
+    def get_membresia_detalle(self, alerta):
+        if not alerta.membresia:
+            return None
+        return {
+            "id": alerta.membresia.id,
+            "nombre": alerta.membresia.nombre,
+            "estado": alerta.membresia.estado,
+        }
+
+    def get_pago_detalle(self, alerta):
+        if not alerta.pago:
+            return None
+        return {
+            "id": alerta.pago.id,
+            "valor": alerta.pago.valor,
+            "concepto": alerta.pago.get_concepto_display(),
+        }
+
+    def get_gasto_detalle(self, alerta):
+        if not alerta.gasto:
+            return None
+        return {
+            "id": alerta.gasto.id,
+            "descripcion": alerta.gasto.descripcion,
+            "valor": alerta.gasto.valor,
+        }

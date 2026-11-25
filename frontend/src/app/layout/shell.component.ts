@@ -44,6 +44,7 @@ export class ShellComponent {
   protected readonly sidebarOpen = signal(false);
   protected readonly pageTitle = signal('Inicio');
   protected readonly counts = signal<ResourceCounts>({});
+  protected readonly aliases = signal<Record<string, string>>({});
   protected readonly today = capitalize(
     new Intl.DateTimeFormat('es-CO', {
       weekday: 'long',
@@ -54,11 +55,20 @@ export class ShellComponent {
 
   protected readonly groups = computed(() => {
     const counts = this.counts();
+    const aliases = this.aliases();
     return NAV_GROUPS.map((group) => ({
       ...group,
       items: group.items
         .filter((item) => this.canSee(item))
-        .map((item) => ({ ...item, count: contar(item, counts) })),
+        .map((item) => {
+          const alias = item.recurso ? aliases[item.recurso] : undefined;
+          return {
+            ...item,
+            count: contar(item, counts),
+            label: alias ?? item.label,
+            route: item.rutaOriginal ?? item.route,
+          };
+        }),
     })).filter((group) => group.items.length > 0);
   });
 
@@ -66,6 +76,7 @@ export class ShellComponent {
 
   constructor() {
     this.loadCounts();
+    this.loadAliases();
     // Esperar al primer NavigationEnd para tener el snapshot completo del router
     this.router.events
       .pipe(
@@ -75,21 +86,23 @@ export class ShellComponent {
       .subscribe(() => {
         this.updateTitle();
         this.sidebarOpen.set(false);
-        // Los totales se recalculan al navegar para reflejar altas y bajas.
+        // Los totales y alias se recalculan al navegar para reflejar cambios.
         this.loadCounts();
+        this.loadAliases();
       });
 
     // Título inicial: esperar microtask para que el router tenga el estado inicial
     Promise.resolve().then(() => this.updateTitle());
 
-    // Al volver a la pestaña se refrescan permisos y conteos: si un
-    // administrador cambió el rol, el menú se ajusta sin recargar la página.
+    // Al volver a la pestaña se refrescan permisos, conteos y alias: si un
+    // administrador cambió un nombre de recurso, el menú se ajusta sin recargar.
     fromEvent(window, 'focus')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         if (!this.auth.authenticated()) return;
         this.auth.refresh().subscribe({ error: () => undefined });
         this.loadCounts();
+        this.loadAliases();
       });
   }
 
@@ -102,6 +115,22 @@ export class ShellComponent {
         // El menú sigue siendo utilizable aunque falle el conteo.
         error: () => this.counts.set({}),
       });
+  }
+
+  private readonly ALIAS_STORAGE_KEY = 'gym_recursos_alias';
+
+  private loadAliases(): void {
+    try {
+      const raw = sessionStorage.getItem(this.ALIAS_STORAGE_KEY);
+      if (!raw) {
+        this.aliases.set({});
+        return;
+      }
+      const guardados: Record<string, string> = JSON.parse(raw);
+      this.aliases.set(guardados);
+    } catch {
+      this.aliases.set({});
+    }
   }
 
   protected toggleSidebar(): void {

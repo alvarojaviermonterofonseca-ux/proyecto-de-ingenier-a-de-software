@@ -26,6 +26,12 @@ RECURSOS_MENU: frozenset[str] = frozenset(
         "registros-comida",
         "notificaciones",
         "auditoria",
+        "metodos-pago",
+        "categorias-gasto",
+        "pagos",
+        "gastos",
+        "membresias",
+        "alertas",
     }
 )
 

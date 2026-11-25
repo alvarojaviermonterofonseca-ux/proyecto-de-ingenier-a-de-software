@@ -232,7 +232,7 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.MultiPartParser",
         "rest_framework.parsers.FormParser",
     ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "config.pagination.PaginacionApi",
     "PAGE_SIZE": int(os.getenv("API_PAGE_SIZE", "25")),
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -242,6 +242,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_THROTTLE_RATES": {
         "login": os.getenv("LOGIN_THROTTLE_RATE", "10/min"),
+        "registro": os.getenv("REGISTRO_THROTTLE_RATE", "20/hour"),
     },
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
 }

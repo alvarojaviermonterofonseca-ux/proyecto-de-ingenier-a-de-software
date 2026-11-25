@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from gym.management.gimnasios import resolver_gimnasio
 from gym.models import (
     Administrador,
     Asistencia,
@@ -54,8 +55,23 @@ class Command(BaseCommand):
             type=int,
             help="Cantidad objetivo de cuentas demo por cada rol. Tiene prioridad sobre --cantidad.",
         )
+        parser.add_argument(
+            "--gimnasio",
+            help="Código del gimnasio. Opcional si la plataforma tiene uno solo.",
+        )
 
     def handle(self, *args, **options):
+        gimnasio = resolver_gimnasio(options.get("gimnasio"))
+        # Los correos y usernames son únicos en toda la plataforma: los demo de
+        # otros gimnasios usan un dominio y un prefijo propios.
+        dominio = (
+            "gymcontrol.local"
+            if gimnasio.codigo == "principal"
+            else f"{gimnasio.codigo}.gymcontrol.local"
+        )
+        prefijo_username = (
+            "demo_usuario" if gimnasio.codigo == "principal" else f"demo_{gimnasio.codigo}"
+        )
         cantidad = options["cantidad"]
         cantidad_por_rol = options["por_rol"]
         if cantidad_por_rol is None and cantidad < 5:
@@ -78,7 +94,9 @@ class Command(BaseCommand):
             objetivos = {nombre: base + (posicion < restante) for posicion, nombre in enumerate(nombres_rol)}
 
         usuarios_demo = list(
-            Usuario.objects.filter(correo__startswith=self.prefijo_correo).select_related("rol")
+            Usuario.objects.filter(
+                gimnasio=gimnasio, correo__startswith=self.prefijo_correo
+            ).select_related("rol")
         )
         actuales = {nombre: 0 for nombre in nombres_rol}
         for usuario in usuarios_demo:
@@ -100,13 +118,14 @@ class Command(BaseCommand):
         with transaction.atomic():
             for nombre_rol in nombres_rol:
                 for _ in range(faltan_por_rol[nombre_rol]):
-                    while f"{self.prefijo_correo}{siguiente_indice:03d}@gymcontrol.local" in correos_demo:
+                    while f"{self.prefijo_correo}{siguiente_indice:03d}@{dominio}" in correos_demo:
                         siguiente_indice += 1
                     usuario = Usuario.objects.create(
+                        gimnasio=gimnasio,
                         rol=roles[nombre_rol],
                         nombre=f"Usuario Demo {siguiente_indice:03d}",
-                        username=f"demo_usuario_{siguiente_indice:03d}",
-                        correo=f"{self.prefijo_correo}{siguiente_indice:03d}@gymcontrol.local",
+                        username=f"{prefijo_username}_{siguiente_indice:03d}"[:100],
+                        correo=f"{self.prefijo_correo}{siguiente_indice:03d}@{dominio}",
                         contrasena_hash=hash_contrasena,
                         telefono=f"+57 300 555 {siguiente_indice:04d}",
                         is_active=True,
@@ -173,11 +192,14 @@ class Command(BaseCommand):
 
             ejercicios = []
             grupos_musculares = ("Pecho", "Espalda", "Piernas", "Core", "Hombros")
-            ejercicio_inicial = Ejercicio.objects.filter(nombre__startswith="Ejercicio demo ").count()
+            ejercicio_inicial = Ejercicio.objects.filter(
+                gimnasio=gimnasio, nombre__startswith="Ejercicio demo "
+            ).count()
             for indice in range(1, max(2, len(clientes)) + 1):
                 numero_ejercicio = ejercicio_inicial + indice
                 ejercicios.append(
                     Ejercicio.objects.create(
+                        gimnasio=gimnasio,
                         nombre=f"Ejercicio demo {numero_ejercicio:03d}",
                         descripcion=f"Descripción completa del ejercicio demo {numero_ejercicio:03d}.",
                         grupo_muscular=grupos_musculares[(indice - 1) % len(grupos_musculares)],
@@ -185,10 +207,14 @@ class Command(BaseCommand):
                 )
 
             entrenadores_demo = list(
-                Entrenador.objects.filter(usuario__correo__startswith=self.prefijo_correo).order_by("pk")
+                Entrenador.objects.filter(
+                    usuario__gimnasio=gimnasio, usuario__correo__startswith=self.prefijo_correo
+                ).order_by("pk")
             )
             terapeutas_demo = list(
-                Terapeuta.objects.filter(usuario__correo__startswith=self.prefijo_correo).order_by("pk")
+                Terapeuta.objects.filter(
+                    usuario__gimnasio=gimnasio, usuario__correo__startswith=self.prefijo_correo
+                ).order_by("pk")
             )
             for indice, cliente_usuario in enumerate(clientes, start=1):
                 cliente = Cliente.objects.get(pk=cliente_usuario.pk)

@@ -1,20 +1,24 @@
 """ViewSets CRUD para todos los recursos de Gym Control Pro."""
 
+import calendar
 import csv
 import io
 import json
 import mimetypes
-from datetime import timedelta
+from collections import Counter
+from datetime import datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from django.contrib.auth import logout as django_logout
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db import IntegrityError, models, transaction
+from django.db.models import Count, Q, Sum
 from django.db.models.deletion import ProtectedError
 from django.http import FileResponse, HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import renderers, status, viewsets
@@ -27,7 +31,9 @@ from rest_framework.views import APIView
 
 from .models import (
     Administrador,
+    Alerta,
     Asistencia,
+    CategoriaGasto,
     Cliente,
     ClienteEntrenador,
     ClienteTerapeuta,
@@ -36,7 +42,12 @@ from .models import (
     Entrenador,
     Entrenamiento,
     EventoAuditoria,
+    Gasto,
+    Gimnasio,
+    Membresia,
+    MetodoPago,
     Notificacion,
+    Pago,
     Permiso,
     PlanAlimentacion,
     PlanEntrenamiento,
@@ -58,6 +69,9 @@ from .permissions import (
     TienePermisoRecurso,
     es_administrador,
 )
+from .alertas import alerta_nuevo_gasto, generar_alertas_de
+from .reportes import MAX_DIAS_RANGO, TIPOS_REPORTE, a_excel, a_pdf, construir_reporte
+from .tenancy import es_plataforma, filtrar_por_gimnasio, gimnasio_id_de
 from .scoping import (
     clientes_clinicos,
     clientes_operativos,
@@ -68,10 +82,13 @@ from .scoping import (
     roles_efectivos_nombres,
     usuarios_visibles,
 )
+from .resource_aliases import get_all_aliases, get_alias, resolve_name, set_alias
 from .resources import RECURSOS_API, RECURSOS_MENU
 from .serializers import (
     AdministradorSerializer,
+    AlertaSerializer,
     AsistenciaSerializer,
+    CategoriaGastoSerializer,
     ClienteEntrenadorSerializer,
     ClienteOperativoSerializer,
     ClienteSerializer,
@@ -81,8 +98,13 @@ from .serializers import (
     EntrenadorSerializer,
     EntrenamientoSerializer,
     EventoAuditoriaSerializer,
+    GastoSerializer,
+    GimnasioConfiguracionSerializer,
     LoginSerializer,
+    MembresiaSerializer,
+    MetodoPagoSerializer,
     NotificacionSerializer,
+    PagoSerializer,
     PerfilActualPasswordSerializer,
     PerfilActualUpdateSerializer,
     PERFIL_PROPIO_SERIALIZERS,
@@ -93,6 +115,7 @@ from .serializers import (
     PlanEntrenamientoSerializer,
     RecepcionistaSerializer,
     RegistroComidaSerializer,
+    RegistroPublicoSerializer,
     RolesUsuarioPayloadSerializer,
     RolPermisoSerializer,
     RolSerializer,
@@ -118,12 +141,85 @@ def usuarios_con_rol(rol):
     ).distinct()
 
 
+def _sumar_meses(fecha, meses):
+    """Suma meses a una fecha; si el día no existe usa el último del mes."""
+    indice = fecha.month - 1 + meses
+    anio = fecha.year + indice // 12
+    mes = indice % 12 + 1
+    dia = min(fecha.day, calendar.monthrange(anio, mes)[1])
+    return fecha.replace(year=anio, month=mes, day=dia)
+
+
+PERIODOS_MESES_DASHBOARD = (3, 6, 12, 24)
+PERIODOS_DIAS_DASHBOARD = (7, 14, 30, 90)
+
+
+def _periodo_param(request, nombre, permitidos, por_defecto):
+    """Lee un período entero de la URL y lo valida contra ``permitidos``."""
+    valor = request.query_params.get(nombre)
+    if valor in (None, ""):
+        return por_defecto
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        numero = None
+    if numero not in permitidos:
+        opciones = ", ".join(str(opcion) for opcion in permitidos)
+        raise ValidationError({nombre: f"Valor no permitido. Use uno de: {opciones}."})
+    return numero
+
+
+def _fecha_param(request, nombre):
+    """Lee una fecha ``AAAA-MM-DD`` de la URL; responde 400 si no es válida."""
+    valor = request.query_params.get(nombre)
+    if not valor:
+        return None
+    try:
+        fecha = parse_date(valor)
+    except ValueError:
+        fecha = None
+    if fecha is None:
+        raise ValidationError({nombre: "Use una fecha válida con formato AAAA-MM-DD."})
+    return fecha
+
+
+def _inicio_del_dia(fecha):
+    return timezone.make_aware(datetime.combine(fecha, time.min))
+
+
+def _entero_param(datos, nombre, minimo, maximo, predeterminado=None):
+    """Entero acotado tomado del cuerpo de la petición; responde 400 si no lo es."""
+    valor = datos.get(nombre, predeterminado)
+    if isinstance(valor, bool):
+        valor = None
+    try:
+        valor = int(valor)
+    except (TypeError, ValueError) as error:
+        raise ValidationError({nombre: "Debe ser un número entero."}) from error
+    if not minimo <= valor <= maximo:
+        raise ValidationError({nombre: f"Debe estar entre {minimo} y {maximo}."})
+    return valor
+
+
+def _es_numero(texto):
+    try:
+        float(texto)
+    except ValueError:
+        return False
+    return True
+
+
 def _valor_csv(valor):
     if valor is None:
         return ""
     if isinstance(valor, (dict, list)):
         return json.dumps(valor, ensure_ascii=False)
-    return str(valor)
+    texto = str(valor)
+    # Excel y LibreOffice ejecutan como fórmula las celdas que empiezan por
+    # estos caracteres; el apóstrofo las deja como texto.
+    if texto[:1] in ("=", "+", "-", "@", "\t", "\r") and not _es_numero(texto):
+        return "'" + texto
+    return texto
 
 
 def respuesta_csv(filas, nombre):
@@ -137,7 +233,10 @@ def respuesta_csv(filas, nombre):
             escritor.writerow(
                 {campo: _valor_csv(fila.get(campo)) for campo in campos}
             )
-    respuesta = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
+    # La marca BOM hace que Excel lea el archivo como UTF-8 y no rompa las tildes.
+    respuesta = HttpResponse(
+        "\ufeff" + buffer.getvalue(), content_type="text/csv; charset=utf-8"
+    )
     respuesta["Content-Disposition"] = f'attachment; filename="{nombre}.csv"'
     respuesta["Cache-Control"] = "private, no-store"
     return respuesta
@@ -168,6 +267,42 @@ class LoginView(APIView):
                 "usuario": UsuarioReadSerializer(usuario, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class RegistroView(APIView):
+    """Registro público: crea una cuenta con rol de cliente y abre sesión."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "registro"
+
+    @extend_schema(
+        request=RegistroPublicoSerializer,
+        responses={
+            201: OpenApiResponse(
+                description="Cuenta creada; devuelve token y datos del usuario."
+            )
+        },
+        auth=[],
+    )
+    def post(self, request):
+        serializer = RegistroPublicoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.save()
+        token, sesion = Sesion.crear_para_usuario(usuario)
+        return Response(
+            {
+                "mensaje": "Cuenta creada correctamente.",
+                "token": token,
+                "tipo_token": "Bearer",
+                "expira_at": sesion.expira_at,
+                "usuario": UsuarioReadSerializer(
+                    usuario, context={"request": request}
+                ).data,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -368,6 +503,7 @@ class ResumenView(APIView):
             is_active=True,
             deleted_at__isnull=True,
         )
+        notificaciones = filtrar_por_gimnasio(notificaciones, usuario)
         if not es_administrador(usuario):
             notificaciones = notificaciones.filter(usuario=usuario)
 
@@ -513,7 +649,9 @@ class ResumenView(APIView):
         actividad_reciente = []
         if es_administrador(usuario):
             actividad_reciente = EventoAuditoriaSerializer(
-                EventoAuditoria.objects.select_related("actor").order_by("-created_at")[:8],
+                filtrar_por_gimnasio(
+                    EventoAuditoria.objects.select_related("actor"), usuario
+                ).order_by("-created_at")[:8],
                 many=True,
                 context=contexto,
             ).data
@@ -529,6 +667,433 @@ class ResumenView(APIView):
                 "actividad_reciente": actividad_reciente,
             }
         )
+
+
+class DashboardFinancieroView(APIView):
+    """
+    Dashboard financiero y administrativo completo para administradores.
+
+    Proporciona métricas consolidadas de clientes, asistencias, ingresos,
+    gastos, membresías y gráficas para visualización.
+    Solo accesible para administradores del gimnasio.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _puede(self, permiso):
+        usuario = self.request.user
+        if not isinstance(usuario, Usuario):
+            return bool(getattr(usuario, "is_staff", False))
+        return usuario.tiene_permiso(permiso)
+
+    @extend_schema(responses={200: OpenApiResponse(description="Dashboard financiero completo.")})
+    def get(self, request):
+        usuario = request.user
+
+        # Solo administradores pueden ver el dashboard financiero
+        if not es_administrador(usuario):
+            raise PermissionDenied("Solo administradores pueden acceder al dashboard financiero.")
+
+        # Períodos de las gráficas: ``?meses=`` para series mensuales y
+        # ``?dias=`` para asistencias diarias. Se validan contra listas cerradas.
+        num_meses = _periodo_param(request, "meses", PERIODOS_MESES_DASHBOARD, 12)
+        num_dias = _periodo_param(request, "dias", PERIODOS_DIAS_DASHBOARD, 30)
+
+        # Las membresías solo calculan su estado al crearse: se ponen al día
+        # antes de contar para que "por vencer" y "vencidas" sean reales.
+        # Pone al día estados de membresía y alertas del gimnasio antes de
+        # contar, para que "por vencer", "vencidas" y las alertas sean reales.
+        generar_alertas_de(usuario)
+
+        # Todo se calcula sobre el gimnasio del usuario autenticado.
+        clientes = clientes_operativos(usuario)
+        usuarios = usuarios_visibles(usuario)
+
+        # Fechas de referencia
+        ahora = timezone.localtime()
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fin_dia = inicio_dia + timedelta(days=1)
+        inicio_semana = inicio_dia - timedelta(days=inicio_dia.weekday())
+        inicio_mes = inicio_dia.replace(day=1)
+        inicio_anio = inicio_dia.replace(month=1, day=1)
+
+        # =====================================================================
+        # MÉTRICAS DE CLIENTES
+        # =====================================================================
+        clientes_base = clientes.filter(is_active=True, deleted_at__isnull=True)
+        membresias_activas = Membresia.objects.filter(
+            cliente__in=clientes_base,
+            estado__in=[Membresia.Estado.ACTIVA, Membresia.Estado.POR_VENCER],
+            deleted_at__isnull=True,
+        )
+
+        hoy = timezone.localdate()
+        clientes_nuevos_dia = clientes_base.filter(created_at__gte=inicio_dia, created_at__lt=fin_dia).count()
+        clientes_nuevos_mes = clientes_base.filter(created_at__gte=inicio_mes).count()
+        clientes_por_vencer = membresias_activas.filter(
+            estado=Membresia.Estado.POR_VENCER,
+            fecha_fin__lte=hoy + timedelta(days=7),
+        ).count()
+        # Clientes cuya membresía venció y no tienen otra vigente.
+        vencidas_sin_vigente = Membresia.objects.filter(
+            cliente__in=clientes_base,
+            estado=Membresia.Estado.VENCIDA,
+            deleted_at__isnull=True,
+        ).exclude(cliente__in=membresias_activas.values("cliente"))
+        clientes_vencidos = vencidas_sin_vigente.values("cliente").distinct().count()
+        clientes_sin_renovar = (
+            vencidas_sin_vigente.filter(fecha_fin__gte=hoy - timedelta(days=30))
+            .values("cliente")
+            .distinct()
+            .count()
+        )
+
+        metricas_clientes = {
+            "total_registrados": clientes_base.count(),
+            "activos": clientes_base.filter(
+                pk__in=membresias_activas.values("cliente")
+            ).count(),
+            "inactivos": clientes_base.exclude(
+                pk__in=membresias_activas.values("cliente")
+            ).count(),
+            "membresias_vencidas": clientes_vencidos,
+            "nuevos_dia": clientes_nuevos_dia,
+            "nuevos_mes": clientes_nuevos_mes,
+            "por_vencer": clientes_por_vencer,
+            "sin_renovar": clientes_sin_renovar,
+        }
+
+        # =====================================================================
+        # MÉTRICAS DE ASISTENCIAS
+        # =====================================================================
+        asistencias = Asistencia.objects.filter(
+            cliente__in=clientes_base,
+            is_active=True,
+            deleted_at__isnull=True,
+        )
+
+        asistencias_hoy = asistencias.filter(entrada_at__gte=inicio_dia, entrada_at__lt=fin_dia)
+        asistencias_semana = asistencias.filter(entrada_at__gte=inicio_semana)
+        asistencias_mes = asistencias.filter(entrada_at__gte=inicio_mes)
+
+        # Día y hora se calculan en Python con la hora local. Así no dependen de
+        # las tablas de zonas horarias del motor: MySQL las necesita para
+        # ``__date`` y ``__hour`` y, si no están cargadas, devuelve vacío.
+        hace_30_dias = inicio_dia - timedelta(days=29)
+        asistencias_30 = asistencias.filter(entrada_at__gte=hace_30_dias)
+        inicio_ventana = inicio_dia - timedelta(days=max(num_dias, 30) - 1)
+        entradas_ventana = [
+            timezone.localtime(momento)
+            for momento in asistencias.filter(entrada_at__gte=inicio_ventana).values_list(
+                "entrada_at", flat=True
+            )
+        ]
+        fecha_30 = hace_30_dias.date()
+        entradas_30 = [momento for momento in entradas_ventana if momento.date() >= fecha_30]
+        asistencias_por_fecha_ventana = Counter(momento.date() for momento in entradas_ventana)
+        asistencias_por_fecha = Counter(momento.date() for momento in entradas_30)
+        asistencias_por_hora = Counter(momento.hour for momento in entradas_30)
+        promedio_diario = round(
+            len(entradas_30) / max(len(asistencias_por_fecha), 1), 1
+        )
+
+        # Horarios de mayor/menor afluencia (por hora)
+        horas_por_afluencia = sorted(
+            asistencias_por_hora.items(), key=lambda par: (-par[1], par[0])
+        )
+        hora_pico = horas_por_afluencia[0][0] if horas_por_afluencia else None
+        hora_valle = horas_por_afluencia[-1][0] if horas_por_afluencia else None
+
+        # Top clientes que más asisten
+        top_clientes_asistencia = (
+            asistencias_30.values("cliente__usuario__nombre", "cliente_id")
+            .annotate(total=models.Count("id"))
+            .order_by("-total")[:10]
+        )
+
+        metricas_asistencias = {
+            "hoy": asistencias_hoy.count(),
+            "semana": asistencias_semana.count(),
+            "mes": asistencias_mes.count(),
+            "promedio_diario": promedio_diario,
+            "hora_pico": f"{hora_pico:02d}:00" if hora_pico is not None else None,
+            "hora_valle": f"{hora_valle:02d}:00" if hora_valle is not None else None,
+            "top_clientes": list(top_clientes_asistencia),
+        }
+
+        # =====================================================================
+        # MÉTRICAS FINANCIERAS
+        # =====================================================================
+        # Los pagos se toman por gimnasio y no por clientes activos: el dinero
+        # recibido de un cliente que luego se dio de baja sigue siendo ingreso.
+        pagos = filtrar_por_gimnasio(Pago.objects.filter(deleted_at__isnull=True), usuario)
+        # Los gastos anulados (cancelados) no restan de la ganancia.
+        gastos = filtrar_por_gimnasio(
+            Gasto.objects.filter(deleted_at__isnull=True), usuario
+        ).exclude(estado=Gasto.Estado.CANCELADO)
+
+        # Ingresos (solo pagos completados)
+        pagos_completados = pagos.filter(estado=Pago.Estado.COMPLETADO)
+        pagos_pendientes = pagos.filter(estado=Pago.Estado.PENDIENTE)
+
+        ingresos_dia = pagos_completados.filter(fecha_pago__gte=inicio_dia, fecha_pago__lt=fin_dia).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        ingresos_semana = pagos_completados.filter(fecha_pago__gte=inicio_semana).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        ingresos_mes = pagos_completados.filter(fecha_pago__gte=inicio_mes).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        ingresos_anio = pagos_completados.filter(fecha_pago__gte=inicio_anio).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+
+        pendientes_dia = pagos_pendientes.filter(fecha_pago__gte=inicio_dia, fecha_pago__lt=fin_dia).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        pendientes_mes = pagos_pendientes.filter(fecha_pago__gte=inicio_mes).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+
+        # Gastos
+        gastos_dia = gastos.filter(fecha__gte=inicio_dia, fecha__lt=fin_dia).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        gastos_mes = gastos.filter(fecha__gte=inicio_mes).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+        gastos_anio = gastos.filter(fecha__gte=inicio_anio).aggregate(
+            total=Sum("valor")
+        )["total"] or Decimal("0")
+
+        # Ganancia neta = Ingresos completados - Gastos
+        ganancia_dia = ingresos_dia - gastos_dia
+        ganancia_mes = ingresos_mes - gastos_mes
+        ganancia_anio = ingresos_anio - gastos_anio
+
+        # Distribución de ingresos por concepto
+        ingresos_por_concepto = list(
+            pagos_completados.filter(fecha_pago__gte=inicio_mes)
+            .values("concepto")
+            .annotate(total=Sum("valor"), count=models.Count("id"))
+            .order_by("-total")
+        )
+
+        # Distribución de gastos por categoría
+        gastos_por_categoria = list(
+            gastos.filter(fecha__gte=inicio_mes)
+            .values("categoria__nombre", "categoria__color")
+            .annotate(total=Sum("valor"), count=models.Count("id"))
+            .order_by("-total")
+        )
+
+        metricas_financieras = {
+            "ingresos": {
+                "dia": float(ingresos_dia),
+                "semana": float(ingresos_semana),
+                "mes": float(ingresos_mes),
+                "anio": float(ingresos_anio),
+                "pendientes_dia": float(pendientes_dia),
+                "pendientes_mes": float(pendientes_mes),
+                "por_concepto": ingresos_por_concepto,
+            },
+            "gastos": {
+                "dia": float(gastos_dia),
+                "mes": float(gastos_mes),
+                "anio": float(gastos_anio),
+                "por_categoria": gastos_por_categoria,
+            },
+            "ganancia_neta": {
+                "dia": float(ganancia_dia),
+                "mes": float(ganancia_mes),
+                "anio": float(ganancia_anio),
+            },
+        }
+
+        # =====================================================================
+        # MÉTRICAS DE MEMBRESÍAS
+        # =====================================================================
+        membresias = Membresia.objects.filter(
+            cliente__in=clientes_base,
+            deleted_at__isnull=True,
+        )
+
+        membresias_mes = membresias.filter(fecha_inicio__gte=inicio_mes)
+        renovaciones_mes = membresias.filter(
+            fecha_ultima_renovacion__gte=inicio_mes,
+            fecha_ultima_renovacion__isnull=False,
+        )
+
+        metricas_membresias = {
+            "activas": membresias.filter(estado__in=[Membresia.Estado.ACTIVA, Membresia.Estado.POR_VENCER]).count(),
+            "vencidas": membresias.filter(estado=Membresia.Estado.VENCIDA).count(),
+            "por_vencer": membresias.filter(estado=Membresia.Estado.POR_VENCER).count(),
+            "nuevas_mes": membresias_mes.count(),
+            "renovaciones_mes": renovaciones_mes.count(),
+            "canceladas": membresias.filter(estado=Membresia.Estado.CANCELADA).count(),
+            "ingresos_membresias": float(
+                pagos_completados.filter(
+                    concepto__in=[Pago.Concepto.MEMBRESIA, Pago.Concepto.RENOVACION],
+                    fecha_pago__gte=inicio_mes,
+                ).aggregate(total=Sum("valor"))["total"] or Decimal("0")
+            ),
+            "por_tipo": dict(
+                membresias.filter(estado__in=[Membresia.Estado.ACTIVA, Membresia.Estado.POR_VENCER])
+                .values("tipo")
+                .annotate(count=models.Count("id"))
+                .values_list("tipo", "count")
+            ),
+        }
+
+        # =====================================================================
+        # DATOS PARA GRÁFICAS
+        # =====================================================================
+
+        # Los ``num_meses`` meses terminan en el actual. Cada serie se resuelve
+        # con una sola consulta de agregados condicionales, no una por mes.
+        meses = [_sumar_meses(inicio_mes, -i) for i in range(num_meses - 1, -1, -1)]
+        rangos = [(mes, _sumar_meses(mes, 1)) for mes in meses]
+
+        def por_mes(queryset, campo, agregado, fechas=False):
+            return queryset.aggregate(
+                **{
+                    f"m{i}": agregado(
+                        Q(
+                            **{
+                                f"{campo}__gte": desde.date() if fechas else desde,
+                                f"{campo}__lt": hasta.date() if fechas else hasta,
+                            }
+                        )
+                    )
+                    for i, (desde, hasta) in enumerate(rangos)
+                }
+            )
+
+        ingresos_por_mes = por_mes(
+            pagos_completados, "fecha_pago", lambda filtro: Sum("valor", filter=filtro)
+        )
+        gastos_por_mes = por_mes(
+            gastos, "fecha", lambda filtro: Sum("valor", filter=filtro), fechas=True
+        )
+        clientes_por_mes = por_mes(
+            clientes_base, "created_at", lambda filtro: Count("pk", filter=filtro)
+        )
+
+        # 1. Ingresos vs Gastos (últimos 12 meses)
+        ingresos_gastos_mensual = []
+        for i, mes in enumerate(meses):
+            ing = ingresos_por_mes[f"m{i}"] or Decimal("0")
+            gas = gastos_por_mes[f"m{i}"] or Decimal("0")
+            ingresos_gastos_mensual.append({
+                "mes": mes.strftime("%Y-%m"),
+                "ingresos": float(ing),
+                "gastos": float(gas),
+                "ganancia": float(ing - gas),
+            })
+
+        # 2. Ganancias por mes (últimos 12 meses)
+        ganancias_mensual = [
+            {"mes": item["mes"], "ganancia": item["ganancia"]}
+            for item in ingresos_gastos_mensual
+        ]
+
+        # 3. Asistencias por día (últimos ``num_dias`` días)
+        asistencias_por_dia = []
+        for i in range(num_dias - 1, -1, -1):
+            fecha = (inicio_dia - timedelta(days=i)).date()
+            asistencias_por_dia.append({
+                "fecha": fecha.isoformat(),
+                "total": asistencias_por_fecha_ventana.get(fecha, 0),
+            })
+
+        # 4. Crecimiento de clientes (últimos 12 meses)
+        crecimiento_clientes = [
+            {"mes": mes.strftime("%Y-%m"), "nuevos": clientes_por_mes[f"m{i}"] or 0}
+            for i, mes in enumerate(meses)
+        ]
+
+        # 5. Distribución de membresías
+        distribucion_membresias = list(
+            membresias.filter(estado__in=[Membresia.Estado.ACTIVA, Membresia.Estado.POR_VENCER])
+            .values("tipo")
+            .annotate(count=models.Count("id"))
+        )
+
+        # 6. Activos vs Inactivos
+        activos_count = metricas_clientes["activos"]
+        inactivos_count = metricas_clientes["inactivos"]
+
+        # 7. Horarios de mayor asistencia (por hora)
+        horarios_formateados = [
+            {"hora": f"{hora:02d}:00", "total": total}
+            for hora, total in sorted(asistencias_por_hora.items())
+        ]
+
+        graficas = {
+            "ingresos_vs_gastos": ingresos_gastos_mensual,
+            "ganancias_mensuales": ganancias_mensual,
+            "asistencias_por_dia": asistencias_por_dia,
+            "crecimiento_clientes": crecimiento_clientes,
+            "distribucion_membresias": distribucion_membresias,
+            "clientes_activos_vs_inactivos": {
+                "activos": activos_count,
+                "inactivos": inactivos_count,
+            },
+            "horarios_asistencia": horarios_formateados,
+            "periodo": {"meses": num_meses, "dias": num_dias},
+        }
+
+        # =====================================================================
+        # ALERTAS RECIENTES
+        # =====================================================================
+        alertas_recientes = (
+            filtrar_por_gimnasio(Alerta.objects.por_prioridad(), usuario)
+            .filter(deleted_at__isnull=True, leida=False)
+            .select_related("cliente__usuario", "membresia", "pago", "gasto", "leida_por")[:10]
+        )
+
+        alertas_data = AlertaSerializer(alertas_recientes, many=True, context={"request": request}).data
+
+        return Response({
+            "metricas_clientes": metricas_clientes,
+            "metricas_asistencias": metricas_asistencias,
+            "metricas_financieras": metricas_financieras,
+            "metricas_membresias": metricas_membresias,
+            "graficas": graficas,
+            "alertas_recientes": alertas_data,
+        })
+
+
+class FiltroFechasMixin:
+    """Añade ``?fecha_desde=`` y ``?fecha_hasta=`` (inclusive) al listado.
+
+    Se aplica en ``filter_queryset``, así que el listado, la exportación y las
+    estadísticas del recurso filtran exactamente igual.
+    """
+
+    campo_fecha = None
+    campo_fecha_con_hora = False
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        desde = _fecha_param(self.request, "fecha_desde")
+        hasta = _fecha_param(self.request, "fecha_hasta")
+        if desde and hasta and desde > hasta:
+            raise ValidationError(
+                {"fecha_hasta": "No puede ser anterior a fecha_desde."}
+            )
+        campo = self.campo_fecha
+        if desde:
+            valor = _inicio_del_dia(desde) if self.campo_fecha_con_hora else desde
+            queryset = queryset.filter(**{f"{campo}__gte": valor})
+        if hasta:
+            if self.campo_fecha_con_hora:
+                limite = _inicio_del_dia(hasta + timedelta(days=1))
+                queryset = queryset.filter(**{f"{campo}__lt": limite})
+            else:
+                queryset = queryset.filter(**{f"{campo}__lte": hasta})
+        return queryset
 
 
 class ViewSetBase(viewsets.ModelViewSet):
@@ -575,13 +1140,17 @@ class ViewSetBase(viewsets.ModelViewSet):
     def filtrar_alcance(self, queryset):
         return queryset
 
+    def filtrar_gimnasio(self, queryset):
+        """Aísla los datos por gimnasio antes de cualquier otro alcance."""
+        return filtrar_por_gimnasio(queryset, self.request.user)
+
     def get_queryset(self):
-        return self.filtrar_alcance(self.queryset_base())
+        return self.filtrar_alcance(self.filtrar_gimnasio(self.queryset_base()))
 
     def objeto_permitido(self, request, obj):
         if es_administrador(request.user):
             return True
-        return self.filtrar_alcance(self.queryset_base()).filter(pk=obj.pk).exists()
+        return self.get_queryset().filter(pk=obj.pk).exists()
 
     def respuesta_lista(self, queryset, serializer_class):
         pagina = self.paginate_queryset(queryset)
@@ -704,8 +1273,8 @@ class ViewSetBase(viewsets.ModelViewSet):
             )
 
         try:
-            instancia = modelo.objects.get(pk=pk)
-        except modelo.DoesNotExist as error:
+            instancia = self.filtrar_gimnasio(modelo.objects.all()).get(pk=pk)
+        except (modelo.DoesNotExist, ValueError) as error:
             raise NotFound("No se encontró el recurso solicitado.") from error
 
         ya_activo = (
@@ -742,11 +1311,8 @@ class ViewSetBase(viewsets.ModelViewSet):
 
 
 class RolViewSet(ViewSetBase):
-    queryset = Rol.objects.prefetch_related(
-        "permisos_asignados__permiso",
-        "recursos_asignados__recurso",
-        "asignaciones_usuarios",
-    )
+    # La matriz se precarga en get_queryset, filtrada por gimnasio.
+    queryset = Rol.objects.prefetch_related("asignaciones_usuarios")
     serializer_class = RolSerializer
     recurso_permiso = "roles"
     filterset_fields = ("is_active",)
@@ -757,7 +1323,38 @@ class RolViewSet(ViewSetBase):
     # Catálogo sin deleted_at: el DELETE desactiva el rol y lo oculta.
     politica_borrado = "logico"
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        gimnasio_id = gimnasio_id_de(self.request.user)
+        # Cada gimnasio ve su propia matriz; el personal de la plataforma, la
+        # plantilla que reciben los gimnasios nuevos.
+        filtro = {"gimnasio_id": gimnasio_id} if gimnasio_id else {"gimnasio__isnull": True}
+        return queryset.prefetch_related(
+            models.Prefetch(
+                "permisos_asignados",
+                queryset=RolPermiso.objects.filter(**filtro).select_related("permiso"),
+            ),
+            models.Prefetch(
+                "recursos_asignados",
+                queryset=RolRecurso.objects.filter(**filtro).select_related("recurso"),
+            ),
+        )
+
+    def _proteger_rol_del_sistema(self, rol, accion):
+        if rol.gimnasio_id is None and not es_plataforma(self.request.user):
+            raise PermissionDenied(
+                f"Los roles del sistema son compartidos por todos los gimnasios y no "
+                f"se pueden {accion} desde un gimnasio. Puede cambiar sus permisos."
+            )
+
+    def perform_create(self, serializer):
+        # Un rol creado desde un gimnasio es propio de ese gimnasio.
+        instance = serializer.save(gimnasio_id=gimnasio_id_de(self.request.user))
+        self.registrar_evento("crear", instance)
+        return instance
+
     def perform_update(self, serializer):
+        self._proteger_rol_del_sistema(serializer.instance, "modificar")
         es_rol_admin = serializer.instance.nombre == Rol.Nombre.ADMINISTRADOR
         if es_rol_admin and "nombre" in serializer.validated_data:
             if serializer.validated_data["nombre"] != Rol.Nombre.ADMINISTRADOR:
@@ -782,6 +1379,7 @@ class RolViewSet(ViewSetBase):
             raise ValidationError(
                 {"detalle": "El rol administrador base no puede eliminarse."}
             )
+        self._proteger_rol_del_sistema(instance, "eliminar")
         usuarios_principales = instance.usuarios.filter(
             is_active=True, deleted_at__isnull=True
         )
@@ -812,8 +1410,16 @@ class RolViewSet(ViewSetBase):
     )
     @action(detail=True, methods=["get", "put"], url_path="permisos")
     def permisos(self, request, pk=None):
-        """Consulta o reemplaza atómicamente los permisos de un rol."""
+        """Consulta o reemplaza atómicamente los permisos de un rol.
+
+        La matriz es por gimnasio: solo se leen y cambian las concesiones del
+        gimnasio del usuario autenticado.
+        """
         rol = self.get_object()
+        gimnasio_id = gimnasio_id_de(request.user)
+        del_gimnasio = (
+            {"gimnasio_id": gimnasio_id} if gimnasio_id else {"gimnasio__isnull": True}
+        )
 
         if request.method == "PUT":
             if not (es_administrador(request.user) or request.user.tiene_permiso("roles:edit")):
@@ -836,17 +1442,21 @@ class RolViewSet(ViewSetBase):
             with transaction.atomic():
                 # Recursos que tenía el rol antes del cambio
                 recursos_antes = set(
-                    rol.recursos_asignados.filter(recurso__is_active=True).values_list(
-                        "recurso__nombre", flat=True
-                    )
+                    RolRecurso.objects.filter(
+                        rol=rol, recurso__is_active=True, **del_gimnasio
+                    ).values_list("recurso__nombre", flat=True)
                 )
-                RolPermiso.objects.filter(rol=rol).exclude(permiso__in=permisos).delete()
+                RolPermiso.objects.filter(rol=rol, **del_gimnasio).exclude(
+                    permiso__in=permisos
+                ).delete()
                 existentes = set(
-                    RolPermiso.objects.filter(rol=rol).values_list("permiso_id", flat=True)
+                    RolPermiso.objects.filter(rol=rol, **del_gimnasio).values_list(
+                        "permiso_id", flat=True
+                    )
                 )
                 RolPermiso.objects.bulk_create(
                     [
-                        RolPermiso(rol=rol, permiso=permiso)
+                        RolPermiso(rol=rol, permiso=permiso, gimnasio_id=gimnasio_id)
                         for permiso in permisos
                         if permiso.pk not in existentes
                     ]
@@ -858,13 +1468,15 @@ class RolViewSet(ViewSetBase):
                 }
                 for nombre_recurso in recursos:
                     recurso, _ = Recurso.objects.get_or_create(nombre=nombre_recurso)
-                    RolRecurso.objects.get_or_create(rol=rol, recurso=recurso)
+                    RolRecurso.objects.get_or_create(
+                        rol=rol, recurso=recurso, gimnasio_id=gimnasio_id
+                    )
                 # Eliminar RolRecurso de recursos que ya no tienen permisos en este rol
                 recursos_despues = set(recursos.keys())
                 recursos_a_eliminar = recursos_antes - recursos_despues
                 if recursos_a_eliminar:
                     RolRecurso.objects.filter(
-                        rol=rol, recurso__nombre__in=recursos_a_eliminar
+                        rol=rol, recurso__nombre__in=recursos_a_eliminar, **del_gimnasio
                     ).delete()
                 registrar_evento(
                     request,
@@ -874,7 +1486,9 @@ class RolViewSet(ViewSetBase):
                     detalles={"permisos": codigos},
                 )
 
-        asignaciones = rol.permisos_asignados.select_related("permiso").filter(permiso__is_active=True)
+        asignaciones = RolPermiso.objects.select_related("permiso").filter(
+            rol=rol, permiso__is_active=True, **del_gimnasio
+        )
         return Response(
             {
                 "rol": rol.pk,
@@ -898,6 +1512,17 @@ class PermisoViewSet(ViewSetBase):
     # Catálogo sin deleted_at: el DELETE desactiva el permiso y lo oculta.
     politica_borrado = "logico"
 
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        # El catálogo de permisos es de toda la plataforma: cambiarlo desde un
+        # gimnasio alteraría a los demás. Los gimnasios lo consultan y asignan
+        # permisos a sus roles desde la matriz.
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not es_plataforma(request.user):
+            raise PermissionDenied(
+                "El catálogo de permisos es común a todos los gimnasios; solo el "
+                "personal de la plataforma puede modificarlo."
+            )
+
 
 class RolPermisoViewSet(ViewSetBase):
     queryset = RolPermiso.objects.select_related("rol", "permiso")
@@ -910,7 +1535,7 @@ class RolPermisoViewSet(ViewSetBase):
 
     def perform_create(self, serializer):
         with transaction.atomic():
-            asignacion = serializer.save()
+            asignacion = serializer.save(gimnasio_id=gimnasio_id_de(self.request.user))
             self.registrar_evento(
                 "asignar-permiso",
                 asignacion.rol,
@@ -965,6 +1590,7 @@ class UsuarioViewSet(ViewSetBase):
         if es_administrador(instance):
             administradores = (
                 Usuario.objects.filter(
+                    gimnasio_id=instance.gimnasio_id,
                     is_active=True,
                     deleted_at__isnull=True,
                 )
@@ -1044,7 +1670,7 @@ class UsuarioViewSet(ViewSetBase):
     )
     @action(detail=True, methods=["get", "patch", "put"], url_path="roles")
     def roles(self, request, pk=None):
-        """Consulta o reemplaza los roles adicionales activos de un usuario."""
+        """Consulta o reemplaza los roles adicionales y el rol principal."""
         usuario = self.get_object()
         mutando = request.method in {"PATCH", "PUT"}
 
@@ -1058,18 +1684,58 @@ class UsuarioViewSet(ViewSetBase):
                     "Solo un usuario con permiso puede modificar los roles de un usuario."
                 )
             roles_ids = request.data.get("roles")
-            if not isinstance(roles_ids, list) or not all(isinstance(valor, int) for valor in roles_ids):
+            if not isinstance(roles_ids, list) or not all(
+                isinstance(valor, int) and not isinstance(valor, bool)
+                for valor in roles_ids
+            ):
                 raise ValidationError({"roles": "Envíe una lista de identificadores de rol."})
 
             roles_ids = list(dict.fromkeys(roles_ids))
-            roles = list(Rol.objects.filter(pk__in=roles_ids))
+            roles = list(filtrar_por_gimnasio(Rol.objects.filter(pk__in=roles_ids), request.user))
             if len(roles) != len(roles_ids):
                 raise ValidationError({"roles": "Uno o más roles no existen."})
             if any(not rol.is_active for rol in roles):
                 raise ValidationError({"roles": "Solo puede asignar roles activos."})
 
+            nuevo_principal = None
+            rol_principal_id = request.data.get("rol_principal")
+            if rol_principal_id is not None:
+                if isinstance(rol_principal_id, bool) or not isinstance(
+                    rol_principal_id, int
+                ):
+                    raise ValidationError(
+                        {"rol_principal": "Envíe un identificador de rol válido."}
+                    )
+                nuevo_principal = filtrar_por_gimnasio(
+                    Rol.objects.filter(pk=rol_principal_id), request.user
+                ).first()
+                if nuevo_principal is None:
+                    raise ValidationError(
+                        {"rol_principal": "El rol principal no existe."}
+                    )
+                cambia_principal = nuevo_principal.pk != usuario.rol_id
+                if cambia_principal and not nuevo_principal.is_active:
+                    raise ValidationError(
+                        {"rol_principal": "Solo puede asignar roles activos."}
+                    )
+                if cambia_principal and not es_administrador(request.user):
+                    raise ValidationError(
+                        {
+                            "rol_principal": (
+                                "Solo un administrador puede cambiar el rol "
+                                "principal."
+                            )
+                        }
+                    )
+            else:
+                cambia_principal = False
+
             deseados = set(roles_ids)
-            deseados.add(usuario.rol_id)
+            if nuevo_principal is not None:
+                deseados.add(nuevo_principal.pk)
+            else:
+                deseados.add(usuario.rol_id)
+
             era_admin = es_administrador(usuario)
             seguira_admin = (
                 usuario.is_active
@@ -1084,9 +1750,10 @@ class UsuarioViewSet(ViewSetBase):
                 and not seguira_admin
                 and not existe_otro_administrador_activo(usuario)
             ):
+                campo = "rol_principal" if cambia_principal else "roles"
                 raise ValidationError(
                     {
-                        "roles": (
+                        campo: (
                             "No puede quitar el rol administrador al último "
                             "administrador activo."
                         )
@@ -1094,6 +1761,19 @@ class UsuarioViewSet(ViewSetBase):
                 )
             asignado_por = request.user if isinstance(request.user, Usuario) else None
             with transaction.atomic():
+                if cambia_principal:
+                    try:
+                        usuario.cambiar_rol_principal(nuevo_principal)
+                    except ProtectedError as error:
+                        raise ValidationError(
+                            {
+                                "rol_principal": (
+                                    "No puede cambiar el rol principal porque el "
+                                    "perfil actual tiene datos asociados. Reasigne "
+                                    "o elimine esos datos primero."
+                                )
+                            }
+                        ) from error
                 existentes = {
                     asignacion.rol_id: asignacion
                     for asignacion in usuario.asignaciones_usuarios.select_for_update()
@@ -1125,7 +1805,10 @@ class UsuarioViewSet(ViewSetBase):
                     "actualizar-roles",
                     "usuarios",
                     usuario,
-                    detalles={"roles": roles_ids},
+                    detalles={
+                        "roles": roles_ids,
+                        "rol_principal": usuario.rol_id,
+                    },
                 )
 
         asignaciones = usuario.asignaciones_usuarios.select_related("rol", "asignado_por")
@@ -1203,7 +1886,9 @@ class UsuarioRolViewSet(ViewSetBase):
             self.registrar_evento("revocar-rol", usuario, detalles={"rol": rol})
 
 
-class ClienteViewSet(ViewSetBase):
+class ClienteViewSet(FiltroFechasMixin, ViewSetBase):
+    campo_fecha = "created_at"
+    campo_fecha_con_hora = True
     queryset = Cliente.objects.select_related("usuario__rol")
     serializer_class = ClienteSerializer
     recurso_permiso = "clientes"
@@ -1410,7 +2095,9 @@ class ClienteTerapeutaViewSet(ViewSetBase):
         self.validar_usuario_relacionado(serializer, "terapeuta")
 
 
-class AsistenciaViewSet(ViewSetBase):
+class AsistenciaViewSet(FiltroFechasMixin, ViewSetBase):
+    campo_fecha = "entrada_at"
+    campo_fecha_con_hora = True
     queryset = Asistencia.objects.select_related("cliente__usuario")
     serializer_class = AsistenciaSerializer
     recurso_permiso = "asistencias"
@@ -1579,13 +2266,40 @@ class EntrenamientoViewSet(ViewSetBase):
         self.validar_usuario_relacionado(serializer, "entrenador")
 
 
+def respuesta_imagen_privada(campo, no_encontrada="El ejercicio no tiene imagen de referencia."):
+    """Entrega un archivo de ``AlmacenamientoFotosPrivadas`` sin caché pública."""
+    if not campo:
+        raise NotFound(no_encontrada)
+    try:
+        archivo = campo.storage.open(campo.name, "rb")
+    except (FileNotFoundError, OSError) as error:
+        raise NotFound("La imagen ya no está disponible.") from error
+    tipo_contenido = mimetypes.guess_type(campo.name)[0] or "application/octet-stream"
+    respuesta = FileResponse(archivo, content_type=tipo_contenido)
+    respuesta["Content-Disposition"] = f'inline; filename="{Path(campo.name).name}"'
+    respuesta["Cache-Control"] = "private, max-age=300"
+    respuesta["X-Content-Type-Options"] = "nosniff"
+    return respuesta
+
+
 class EjercicioViewSet(ViewSetBase):
     queryset = Ejercicio.objects.all()
     serializer_class = EjercicioSerializer
     recurso_permiso = "ejercicios"
+    accion_permiso_por_accion = {"imagen": "view"}
     filterset_fields = ("grupo_muscular", "is_active")
     search_fields = ("nombre", "descripcion", "grupo_muscular")
     ordering_fields = ("nombre", "grupo_muscular", "created_at")
+
+    def get_renderers(self):
+        if getattr(self, "action", None) == "imagen":
+            return [RendererFotoPrivada()]
+        return super().get_renderers()
+
+    @action(detail=True, methods=["get"], url_path="imagen")
+    def imagen(self, request, pk=None):
+        """Imagen de referencia del ejercicio (personal con acceso al catálogo)."""
+        return respuesta_imagen_privada(self.get_object().imagen)
 
 
 class PlanEntrenamientoViewSet(ViewSetBase):
@@ -1602,15 +2316,38 @@ class PlanEntrenamientoViewSet(ViewSetBase):
     def validar_escritura(self, serializer):
         self.validar_cliente_relacionado(serializer)
         self.validar_usuario_relacionado(serializer, "entrenador")
+        actor = self.request.user
+        entrenador = serializer.validated_data.get("entrenador")
+        if (
+            entrenador is not None
+            and not es_administrador(actor)
+            and isinstance(actor, Usuario)
+            and hasattr(actor, "entrenador")
+            and entrenador.pk != actor.pk
+        ):
+            # Un entrenador arma planes a su nombre; el administrador puede
+            # elegir cualquier entrenador asignado al cliente.
+            raise ValidationError({"entrenador": "Solo puede crear planes a su propio nombre."})
 
 
 class PlanEntrenamientoEjercicioViewSet(ViewSetBase):
     queryset = PlanEntrenamientoEjercicio.objects.select_related("plan", "ejercicio")
     serializer_class = PlanEntrenamientoEjercicioSerializer
     recurso_permiso = "planes-entrenamiento-ejercicios"
+    accion_permiso_por_accion = {"imagen": "view"}
     filterset_fields = ("plan", "ejercicio")
     # Fila de composición del plan (sin deleted_at ni is_active): DELETE físico.
     politica_borrado = "fisico"
+
+    def get_renderers(self):
+        if getattr(self, "action", None) == "imagen":
+            return [RendererFotoPrivada()]
+        return super().get_renderers()
+
+    @action(detail=True, methods=["get"], url_path="imagen")
+    def imagen(self, request, pk=None):
+        """Imagen del ejercicio vista desde el plan (el cliente la ve así)."""
+        return respuesta_imagen_privada(self.get_object().ejercicio.imagen)
 
     def filtrar_alcance(self, queryset):
         queryset = queryset.filter(plan__deleted_at__isnull=True)
@@ -1768,6 +2505,328 @@ class NotificacionViewSet(ViewSetBase):
         )
 
 
+# =============================================================================
+# VIEWSETS FINANCIEROS
+# =============================================================================
+
+class MetodoPagoViewSet(ViewSetBase):
+    queryset = MetodoPago.objects.all()
+    serializer_class = MetodoPagoSerializer
+    recurso_permiso = "metodos-pago"
+    filterset_fields = ("tipo", "is_active")
+    search_fields = ("nombre", "descripcion")
+    ordering_fields = ("orden", "nombre", "created_at")
+    politica_borrado = "logico"
+
+    def filtrar_alcance(self, queryset):
+        if es_administrador(self.request.user):
+            return queryset
+        return queryset.none()
+
+
+class CategoriaGastoViewSet(ViewSetBase):
+    queryset = CategoriaGasto.objects.all()
+    serializer_class = CategoriaGastoSerializer
+    recurso_permiso = "categorias-gasto"
+    filterset_fields = ("tipo", "is_active")
+    search_fields = ("nombre", "descripcion")
+    ordering_fields = ("orden", "nombre", "created_at")
+    politica_borrado = "logico"
+
+    def filtrar_alcance(self, queryset):
+        if es_administrador(self.request.user):
+            return queryset
+        return queryset.none()
+
+
+class PagoViewSet(FiltroFechasMixin, ViewSetBase):
+    campo_fecha = "fecha_pago"
+    campo_fecha_con_hora = True
+    queryset = Pago.objects.select_related(
+        "cliente__usuario", "metodo_pago", "membresia", "registrado_por"
+    )
+    serializer_class = PagoSerializer
+    recurso_permiso = "pagos"
+    filterset_fields = ("cliente", "concepto", "estado", "metodo_pago")
+    search_fields = ("cliente__usuario__nombre", "referencia", "notas")
+    ordering_fields = ("fecha_pago", "valor", "created_at")
+
+    def filtrar_alcance(self, queryset):
+        return filtrar_clientes(queryset, "cliente", self.request.user)
+
+    def validar_escritura(self, serializer):
+        self.validar_cliente_relacionado(serializer)
+
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Estadísticas de ingresos.")},
+    )
+    @action(detail=False, methods=["get"], url_path="estadisticas")
+    def estadisticas(self, request):
+        """Estadísticas agregadas de ingresos con filtros de fecha."""
+        # ``filter_queryset`` ya aplica fecha_desde y fecha_hasta.
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Solo pagos completados para ingresos reales
+        completados = queryset.filter(estado=Pago.Estado.COMPLETADO)
+        pendientes = queryset.filter(estado=Pago.Estado.PENDIENTE)
+
+        stats = {
+            "total_ingresos": completados.aggregate(total=Sum("valor"))["total"] or Decimal("0"),
+            "total_pendientes": pendientes.aggregate(total=Sum("valor"))["total"] or Decimal("0"),
+            "count_completados": completados.count(),
+            "count_pendientes": pendientes.count(),
+            "por_concepto": list(
+                completados.values("concepto")
+                .annotate(total=Sum("valor"), count=models.Count("id"))
+                .order_by("-total")
+            ),
+            "por_metodo": list(
+                completados.values("metodo_pago__nombre")
+                .annotate(total=Sum("valor"), count=models.Count("id"))
+                .order_by("-total")
+            ),
+        }
+        return Response(stats)
+
+
+class GastoViewSet(FiltroFechasMixin, ViewSetBase):
+    campo_fecha = "fecha"
+    queryset = Gasto.objects.select_related(
+        "categoria", "metodo_pago", "registrado_por", "aprobado_por"
+    )
+    serializer_class = GastoSerializer
+    recurso_permiso = "gastos"
+    filterset_fields = ("categoria", "estado", "metodo_pago")
+    search_fields = ("descripcion", "referencia", "observaciones")
+    ordering_fields = ("fecha", "valor", "created_at")
+
+    def filtrar_alcance(self, queryset):
+        if es_administrador(self.request.user):
+            return queryset
+        return queryset.none()
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            gasto = super().perform_create(serializer)
+            alerta_nuevo_gasto(gasto)
+        return gasto
+
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Estadísticas de gastos.")},
+    )
+    @action(detail=False, methods=["get"], url_path="estadisticas")
+    def estadisticas(self, request):
+        """Estadísticas agregadas de gastos con filtros de fecha."""
+        # ``filter_queryset`` ya aplica fecha_desde y fecha_hasta.
+        queryset = self.filter_queryset(self.get_queryset())
+        # Los anulados se informan por estado, pero no suman al total.
+        vigentes = queryset.exclude(estado=Gasto.Estado.CANCELADO)
+
+        stats = {
+            "total_gastos": vigentes.aggregate(total=Sum("valor"))["total"] or Decimal("0"),
+            "count": vigentes.count(),
+            "count_anulados": queryset.filter(estado=Gasto.Estado.CANCELADO).count(),
+            "por_categoria": list(
+                vigentes.values("categoria__nombre", "categoria__color")
+                .annotate(total=Sum("valor"), count=models.Count("id"))
+                .order_by("-total")
+            ),
+            "por_estado": list(
+                queryset.values("estado")
+                .annotate(total=Sum("valor"), count=models.Count("id"))
+                .order_by("-total")
+            ),
+        }
+        return Response(stats)
+
+
+class MembresiaViewSet(FiltroFechasMixin, ViewSetBase):
+    # El rango de fechas se aplica al vencimiento de la membresía.
+    campo_fecha = "fecha_fin"
+    accion_permiso_por_accion = {
+        "exportar": "export",
+        "renovar": "edit",
+        "congelar": "edit",
+        "activar": "edit",
+    }
+    queryset = Membresia.objects.select_related(
+        "cliente__usuario", "entrenador_asignado__usuario", "registrado_por"
+    )
+    serializer_class = MembresiaSerializer
+    recurso_permiso = "membresias"
+    filterset_fields = ("cliente", "tipo", "estado", "entrenador_asignado")
+    search_fields = ("nombre", "cliente__usuario__nombre")
+    ordering_fields = ("fecha_inicio", "fecha_fin", "estado", "created_at")
+
+    def filtrar_alcance(self, queryset):
+        return filtrar_clientes(queryset, "cliente", self.request.user)
+
+    def validar_escritura(self, serializer):
+        self.validar_cliente_relacionado(serializer)
+
+    @action(detail=True, methods=["post"], url_path="renovar")
+    def renovar(self, request, pk=None):
+        """Renueva una membresía extendiendo su fecha de fin."""
+        membresia = self.get_object()
+        nuevo_tipo = request.data.get("tipo", membresia.tipo)
+        if nuevo_tipo not in Membresia.Tipo.values:
+            raise ValidationError({"tipo": "El tipo de membresía no es válido."})
+        meses = _entero_param(request.data, "meses", 1, 120, predeterminado=1)
+
+        nueva_fecha_fin = _sumar_meses(membresia.fecha_fin, meses)
+
+        with transaction.atomic():
+            membresia.fecha_ultima_renovacion = membresia.fecha_fin
+            membresia.fecha_fin = nueva_fecha_fin
+            membresia.tipo = nuevo_tipo
+            membresia.estado = Membresia.Estado.ACTIVA
+            # Si aun renovada sigue vencida o a días de vencer, se refleja.
+            membresia.actualizar_estado_por_fecha()
+            membresia.save()
+            self.registrar_evento("renovar", membresia, {"meses": meses})
+
+        return Response(self.get_serializer(membresia).data)
+
+    @action(detail=True, methods=["post"], url_path="congelar")
+    def congelar(self, request, pk=None):
+        """Congela una membresía vigente y corre su vencimiento esos días."""
+        membresia = self.get_object()
+        dias = _entero_param(request.data, "dias", 1, 365)
+
+        if membresia.estado not in (
+            Membresia.Estado.ACTIVA,
+            Membresia.Estado.POR_VENCER,
+        ):
+            raise ValidationError(
+                {"estado": "Solo se pueden congelar membresías vigentes."}
+            )
+
+        with transaction.atomic():
+            membresia.estado = Membresia.Estado.CONGELADA
+            membresia.dias_congelados += dias
+            # El tiempo congelado no se pierde: la vigencia se corre.
+            membresia.fecha_fin += timedelta(days=dias)
+            membresia.save(
+                update_fields=["estado", "dias_congelados", "fecha_fin", "updated_at"]
+            )
+            self.registrar_evento("congelar", membresia, {"dias": dias})
+
+        return Response(self.get_serializer(membresia).data)
+
+    @action(detail=True, methods=["post"], url_path="activar")
+    def activar(self, request, pk=None):
+        """Reactiva una membresía congelada."""
+        membresia = self.get_object()
+
+        if membresia.estado != Membresia.Estado.CONGELADA:
+            raise ValidationError({"estado": "Solo se pueden activar membresías congeladas."})
+
+        with transaction.atomic():
+            membresia.estado = Membresia.Estado.ACTIVA
+            # Puede volver ya vencida o a pocos días de vencer.
+            membresia.actualizar_estado_por_fecha()
+            membresia.save(update_fields=["estado", "updated_at"])
+            self.registrar_evento("activar", membresia)
+
+        return Response(self.get_serializer(membresia).data)
+
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Estadísticas de membresías.")},
+    )
+    @action(detail=False, methods=["get"], url_path="estadisticas")
+    def estadisticas(self, request):
+        """Estadísticas agregadas de membresías."""
+        queryset = self.filter_queryset(self.get_queryset())
+
+        stats = {
+            "total": queryset.count(),
+            "por_estado": dict(
+                queryset.values("estado").annotate(count=models.Count("id")).values_list("estado", "count")
+            ),
+            "por_tipo": dict(
+                queryset.values("tipo").annotate(count=models.Count("id")).values_list("tipo", "count")
+            ),
+            "proximas_a_vencer": queryset.filter(
+                estado__in=[Membresia.Estado.ACTIVA, Membresia.Estado.POR_VENCER],
+                fecha_fin__lte=timezone.localdate() + timedelta(days=30),
+            ).count(),
+            "vencidas": queryset.filter(estado=Membresia.Estado.VENCIDA).count(),
+        }
+        return Response(stats)
+
+
+class AlertaViewSet(ViewSetBase):
+    queryset = Alerta.objects.por_prioridad().select_related(
+        "cliente__usuario", "membresia", "pago", "gasto", "leida_por"
+    )
+    serializer_class = AlertaSerializer
+    recurso_permiso = "alertas"
+    accion_permiso_por_accion = {
+        "exportar": "export",
+        "marcar_leida": "edit",
+        "marcar_todas_leidas": "edit",
+    }
+    filterset_fields = ("tipo", "prioridad", "leida", "cliente")
+    search_fields = ("titulo", "mensaje")
+    ordering_fields = ("prioridad_orden", "created_at")
+
+    def filtrar_alcance(self, queryset):
+        if es_administrador(self.request.user):
+            return queryset
+        # Los no administradores solo ven alertas de sus clientes asignados
+        return filtrar_clientes(queryset, "cliente", self.request.user)
+
+    def _actualizar_alertas(self):
+        # Las reglas son idempotentes; generarlas al consultar evita depender
+        # de una tarea programada para ver alertas al día.
+        if es_administrador(self.request.user):
+            generar_alertas_de(self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        self._actualizar_alertas()
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="marcar-leida")
+    def marcar_leida(self, request, pk=None):
+        alerta = self.get_object()
+        if not alerta.leida:
+            alerta.marcar_como_leida(request.user)
+        return Response(self.get_serializer(alerta).data)
+
+    @action(detail=False, methods=["post"], url_path="marcar-todas-leidas")
+    def marcar_todas_leidas(self, request):
+        ahora = timezone.now()
+        pendientes = self.filter_queryset(self.get_queryset()).filter(leida=False)
+        # ``update`` no admite consultas anotadas ni ordenadas: se filtra por id.
+        count = Alerta.objects.filter(pk__in=pendientes.values("pk")).update(
+            leida=True,
+            leida_por=request.user if isinstance(request.user, Usuario) else None,
+            leida_at=ahora,
+            updated_at=ahora,
+        )
+        return Response({"mensaje": f"{count} alertas marcadas como leídas.", "cantidad": count})
+
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Estadísticas de alertas.")},
+    )
+    @action(detail=False, methods=["get"], url_path="estadisticas")
+    def estadisticas(self, request):
+        self._actualizar_alertas()
+        queryset = self.filter_queryset(self.get_queryset())
+
+        stats = {
+            "total": queryset.count(),
+            "no_leidas": queryset.filter(leida=False).count(),
+            "por_tipo": dict(
+                queryset.values("tipo").annotate(count=models.Count("id")).values_list("tipo", "count")
+            ),
+            "por_prioridad": dict(
+                queryset.values("prioridad").annotate(count=models.Count("id")).values_list("prioridad", "count")
+            ),
+        }
+        return Response(stats)
+
+
 class EventoAuditoriaViewSet(viewsets.ReadOnlyModelViewSet):
     """Consulta de auditoría, reservada a administradores."""
 
@@ -1780,7 +2839,7 @@ class EventoAuditoriaViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ("created_at",)
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = filtrar_por_gimnasio(super().get_queryset(), self.request.user)
         if es_administrador(self.request.user):
             return queryset
         return queryset.none()
@@ -1810,7 +2869,132 @@ _RECURSOS_MENU_VIEWSETS = {
     "registros-comida": RegistroComidaViewSet,
     "notificaciones": NotificacionViewSet,
     "auditoria": EventoAuditoriaViewSet,
+    "metodos-pago": MetodoPagoViewSet,
+    "categorias-gasto": CategoriaGastoViewSet,
+    "pagos": PagoViewSet,
+    "gastos": GastoViewSet,
+    "membresias": MembresiaViewSet,
+    "alertas": AlertaViewSet,
 }
+
+
+class GimnasioActualView(APIView):
+    """Datos y configuración del gimnasio del usuario autenticado.
+
+    Cualquier usuario del gimnasio puede consultarlos; solo un administrador
+    puede cambiarlos. El gimnasio sale de la sesión, nunca de la URL.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _gimnasio(self, request):
+        gimnasio_id = gimnasio_id_de(request.user)
+        if not gimnasio_id:
+            raise NotFound("Esta cuenta no pertenece a ningún gimnasio.")
+        return Gimnasio.objects.get(pk=gimnasio_id)
+
+    @extend_schema(responses=GimnasioConfiguracionSerializer)
+    def get(self, request):
+        return Response(GimnasioConfiguracionSerializer(self._gimnasio(request)).data)
+
+    @extend_schema(request=GimnasioConfiguracionSerializer, responses=GimnasioConfiguracionSerializer)
+    def patch(self, request):
+        if not es_administrador(request.user):
+            raise PermissionDenied("Solo un administrador puede cambiar la configuración del gimnasio.")
+        gimnasio = self._gimnasio(request)
+        serializer = GimnasioConfiguracionSerializer(gimnasio, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            serializer.save()
+            registrar_evento(
+                request,
+                "actualizar-configuracion",
+                "gimnasio",
+                gimnasio,
+                detalles={"campos": sorted(serializer.validated_data)},
+            )
+        return Response(serializer.data)
+
+
+FORMATOS_REPORTE = {
+    "xlsx": (
+        a_excel,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+    "pdf": (a_pdf, "application/pdf"),
+}
+
+
+class ReporteView(APIView):
+    """Descarga un reporte administrativo en Excel o PDF.
+
+    ``GET /api/v1/reportes/<tipo>/?formato=xlsx|pdf&fecha_desde=&fecha_hasta=``
+
+    Solo para administradores. El gimnasio sale del usuario autenticado; el
+    personal de la plataforma (sin gimnasio propio) debe indicar
+    ``?gimnasio=<código>``. Por defecto el período es el mes en curso.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _gimnasio(self, request):
+        usuario = request.user
+        if isinstance(usuario, Usuario):
+            # Un usuario del gimnasio nunca elige el gimnasio por parámetro.
+            return Gimnasio.objects.get(pk=usuario.gimnasio_id)
+        codigo = request.query_params.get("gimnasio")
+        if not codigo:
+            raise ValidationError({"gimnasio": "Indique el código del gimnasio."})
+        gimnasio = Gimnasio.objects.filter(codigo=codigo).first()
+        if gimnasio is None:
+            raise NotFound("No existe un gimnasio con ese código.")
+        return gimnasio
+
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Archivo .xlsx o .pdf del reporte.")},
+    )
+    def get(self, request, tipo):
+        if not es_administrador(request.user):
+            raise PermissionDenied("Solo administradores pueden descargar reportes.")
+        if tipo not in TIPOS_REPORTE:
+            raise NotFound("Tipo de reporte desconocido.")
+        formato = request.query_params.get("formato", "xlsx")
+        if formato not in FORMATOS_REPORTE:
+            raise ValidationError({"formato": "Use xlsx o pdf."})
+
+        hoy = timezone.localdate()
+        desde = _fecha_param(request, "fecha_desde") or hoy.replace(day=1)
+        hasta = _fecha_param(request, "fecha_hasta") or hoy
+        if desde > hasta:
+            raise ValidationError({"fecha_hasta": "No puede ser anterior a fecha_desde."})
+        if (hasta - desde).days > MAX_DIAS_RANGO:
+            raise ValidationError({"fecha_desde": "El período no puede superar cinco años."})
+
+        gimnasio = self._gimnasio(request)
+        if not gimnasio.is_active or gimnasio.deleted_at is not None:
+            raise PermissionDenied("El gimnasio no está activo.")
+        usuario = request.user
+        autor = getattr(usuario, "nombre", None) or usuario.get_username()
+        reporte = construir_reporte(tipo, gimnasio, desde, hasta, autor)
+        generar, tipo_contenido = FORMATOS_REPORTE[formato]
+        contenido = generar(reporte)
+        registrar_evento(
+            request,
+            "exportar-reporte",
+            "reportes",
+            gimnasio,
+            detalles={
+                "tipo": tipo,
+                "formato": formato,
+                "desde": desde.isoformat(),
+                "hasta": hasta.isoformat(),
+            },
+        )
+        nombre = f"reporte_{tipo}_{desde:%Y%m%d}_{hasta:%Y%m%d}.{formato}"
+        respuesta = HttpResponse(contenido, content_type=tipo_contenido)
+        respuesta["Content-Disposition"] = f'attachment; filename="{nombre}"'
+        respuesta["Cache-Control"] = "private, no-store"
+        return respuesta
 
 
 class ConteoRecursosView(APIView):
@@ -1849,4 +3033,112 @@ class ConteoRecursosView(APIView):
         vista.action = "list"
         vista.format_kwarg = None
         return vista.get_queryset().count()
+
+
+class ResourceAliasListView(APIView):
+    """Lista todos los recursos del menú con su nombre de visualización actual.
+
+    El nombre actual es el alias personalizado si existe, o el nombre original
+    del recurso en caso contrario. Solo administradores pueden editar, pero
+    cualquier usuario autenticado puede consultar.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        aliases = get_all_aliases()
+        items = []
+        for nombre in sorted(RECURSOS_MENU):
+            actual = aliases.get(nombre, nombre)
+            items.append(
+                {
+                    "nombre_original": nombre,
+                    "nombre_actual": actual,
+                    "tiene_alias": nombre in aliases,
+                }
+            )
+        return Response(items)
+
+
+class ResourceAliasDetailView(APIView):
+    """Actualiza el nombre de visualización (alias) de un recurso."""
+
+    permission_classes = [IsAuthenticated, SoloAdministrador]
+
+    def put(self, request, nombre_original):
+        # Los nombres visibles se guardan en un archivo común a todos los
+        # gimnasios: solo el personal de la plataforma puede cambiarlos.
+        if not es_plataforma(request.user):
+            raise PermissionDenied(
+                "Los nombres de recursos son comunes a todos los gimnasios; solo el "
+                "personal de la plataforma puede cambiarlos."
+            )
+        if nombre_original not in RECURSOS_MENU:
+            return Response(
+                {
+                    "error": {
+                        "codigo": 404,
+                        "mensaje": "Recurso no encontrado.",
+                        "detalles": {},
+                    }
+                },
+                status=404,
+            )
+
+        nuevo_nombre = request.data.get("nombre_actual")
+        if not nuevo_nombre or not isinstance(nuevo_nombre, str):
+            return Response(
+                {
+                    "error": {
+                        "codigo": 400,
+                        "mensaje": "El campo nombre_actual es requerido.",
+                        "detalles": {},
+                    }
+                },
+                status=400,
+            )
+
+        nuevo_nombre = nuevo_nombre.strip()
+        if not nuevo_nombre:
+            set_alias(nombre_original, None)
+            return Response(
+                {
+                    "nombre_original": nombre_original,
+                    "nombre_actual": nombre_original,
+                    "tiene_alias": False,
+                }
+            )
+
+        aliases = get_all_aliases()
+        for orig, alias in aliases.items():
+            if alias == nuevo_nombre and orig != nombre_original:
+                return Response(
+                    {
+                        "error": {
+                            "codigo": 409,
+                            "mensaje": "Este nombre ya está en uso por otro recurso.",
+                            "detalles": {},
+                        }
+                    },
+                    status=409,
+                )
+
+        set_alias(nombre_original, nuevo_nombre)
+        return Response(
+            {
+                "nombre_original": nombre_original,
+                "nombre_actual": nuevo_nombre,
+                "tiene_alias": True,
+            }
+        )
+
+
+class ResourceAliasResolveView(APIView):
+    """Resuelve un nombre (alias o original) al nombre original del recurso."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, nombre):
+        original = resolve_name(nombre, RECURSOS_MENU)
+        return Response({"nombre": nombre, "nombre_original": original})
 

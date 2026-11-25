@@ -29,6 +29,8 @@ export interface Role {
   nombre: string;
   descripcion: string | null;
   is_active: boolean;
+  /** Rol compartido por todos los gimnasios: solo se cambian sus permisos. */
+  es_del_sistema?: boolean;
   created_at: string;
   updated_at: string;
   permisos: string[];
@@ -64,8 +66,17 @@ export interface UserSummary {
   perfil_detalle: ProfileSummary | null;
 }
 
+export interface GymSummary {
+  id: number;
+  nombre: string;
+  codigo: string;
+  ciudad: string | null;
+}
+
 export interface UserDetail {
   id: number;
+  /** Gimnasio al que pertenece la cuenta; lo asigna el servidor. */
+  gimnasio: GymSummary | null;
   rol: number;
   rol_detalle: Role;
   roles_detalle: Role[];
@@ -92,6 +103,17 @@ export interface LoginResponse {
   tipo_token: string;
   expira_at: string;
   usuario: UserDetail;
+}
+
+export interface RegisterPayload {
+  nombre: string;
+  correo: string;
+  contrasena: string;
+  telefono?: string | null;
+  fecha_nacimiento?: string | null;
+  objetivo?: string | null;
+  /** Código del gimnasio; opcional cuando la plataforma tiene uno solo. */
+  gimnasio?: string;
 }
 
 export interface UserPayload {
@@ -266,6 +288,10 @@ export interface Exercise {
   nombre: string;
   descripcion: string | null;
   grupo_muscular: string | null;
+  /** Códigos del catálogo de músculos (core/training/muscles.ts). */
+  musculos: string[];
+  /** Ruta autenticada de la imagen de referencia, o ``null`` si no tiene. */
+  imagen_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -292,9 +318,16 @@ export interface TrainingPlan {
   fecha_fin: string | null;
   activo: boolean;
   observaciones: string | null;
+  /** Rutina por día: título y músculos que se entrenan. */
+  rutina: Partial<Record<WeekDay, TrainingDay>>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface TrainingDay {
+  titulo: string;
+  musculos: string[];
 }
 
 export type WeekDay =
@@ -475,3 +508,10 @@ export interface Summary {
 
 /** Total de registros por recurso (`GET /api/v1/conteos/`). */
 export type ResourceCounts = Record<string, number>;
+
+/** Nombre de visualización de un recurso (`GET /api/v1/resource-aliases/`). */
+export interface ResourceAlias {
+  nombre_original: string;
+  nombre_actual: string;
+  tiene_alias: boolean;
+}

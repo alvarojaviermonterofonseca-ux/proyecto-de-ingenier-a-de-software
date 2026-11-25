@@ -136,7 +136,7 @@
 
 <app-modal
   [open]="modalOpen()"
-  [title]="editing() ? 'Editar cliente' : 'Nuevo cliente'"
+  [title]="editing() ? 'Editar cliente' : esCliente() ? 'Nuevo cliente' : 'Nuevo usuario'"
   [subtitle]="editing() ? 'Actualiza los datos del perfil. La identidad se administra desde Usuarios.' : 'Se creará la cuenta de acceso y el perfil de cliente.'"
   size="wide"
   (closed)="closeModal()"
@@ -155,30 +155,66 @@
         <p class="form-section__hint">Para cambiar nombre, correo o contraseña usa el módulo de Usuarios.</p>
       }
       <div class="form-grid">
-        <div class="field">
+        @if (!editing()) {
+          <div class="field field--full" [class.has-error]="fieldError('rol')">
+            <label for="client-rol">Rol de la cuenta</label>
+            @if (fieldError('rol'); as mensaje) {
+              <p class="field-error" id="client-rol-error" role="alert">{{ mensaje }}</p>
+            }
+            <select id="client-rol" formControlName="rol" [attr.aria-invalid]="!!fieldError('rol')">
+              @for (role of roles(); track role.id) {
+                <option [ngValue]="role.id">{{ roleLabel(role.nombre) }}</option>
+              }
+            </select>
+            <p class="field-hint">
+              Solo un administrador puede elegir el rol.
+              @if (!esCliente()) {
+                Los datos de perfil de cliente no aplican a este rol y se completan en su módulo.
+              }
+            </p>
+          </div>
+        }
+        <div class="field" [class.has-error]="fieldError('nombre')">
           <label for="client-nombre">Nombre completo</label>
-          <input id="client-nombre" formControlName="nombre" />
+          @if (fieldError('nombre'); as mensaje) {
+            <p class="field-error" id="client-nombre-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-nombre" formControlName="nombre" autocomplete="name" [attr.aria-invalid]="!!fieldError('nombre')" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('correo')">
           <label for="client-correo">Correo</label>
-          <input id="client-correo" type="email" formControlName="correo" />
+          @if (fieldError('correo'); as mensaje) {
+            <p class="field-error" id="client-correo-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-correo" type="email" formControlName="correo" autocomplete="email" [attr.aria-invalid]="!!fieldError('correo')" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('telefono')">
           <label for="client-telefono">Teléfono</label>
-          <input id="client-telefono" formControlName="telefono" />
+          @if (fieldError('telefono'); as mensaje) {
+            <p class="field-error" id="client-telefono-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-telefono" type="tel" formControlName="telefono" autocomplete="tel" [attr.aria-invalid]="!!fieldError('telefono')" />
         </div>
         @if (!editing()) {
-          <div class="field">
+          <div class="field" [class.has-error]="fieldError('contrasena')">
             <label for="client-password">Contraseña inicial</label>
-            <input id="client-password" type="password" formControlName="contrasena" />
-            @if (form.controls.contrasena.touched && form.controls.contrasena.invalid) {
-              <p class="field-error">Mínimo 8 caracteres.</p>
+            @if (fieldError('contrasena'); as mensaje) {
+              <p class="field-error" id="client-password-error" role="alert">{{ mensaje }}</p>
             }
+            <input
+              id="client-password"
+              type="password"
+              formControlName="contrasena"
+              autocomplete="new-password"
+              [attr.aria-invalid]="!!fieldError('contrasena')"
+            />
+            <p class="field-hint">Mínimo 8 caracteres, con letras y números, distinta del nombre y del correo.</p>
           </div>
         }
       </div>
     </div>
 
+    @if (editing() || esCliente()) {
     <div class="form-section">
       <h3>Perfil y objetivo</h3>
       <div class="form-grid form-grid--3">
@@ -192,25 +228,40 @@
             <option value="PA">Pasaporte</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('numero_documento')">
           <label for="client-num-doc">Número de documento</label>
-          <input id="client-num-doc" formControlName="numero_documento" />
+          @if (fieldError('numero_documento'); as mensaje) {
+            <p class="field-error" id="client-num-doc-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-num-doc" formControlName="numero_documento" [attr.aria-invalid]="!!fieldError('numero_documento')" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('fecha_nacimiento')">
           <label for="client-nacimiento">Fecha de nacimiento</label>
-          <input id="client-nacimiento" type="date" formControlName="fecha_nacimiento" />
+          @if (fieldError('fecha_nacimiento'); as mensaje) {
+            <p class="field-error" id="client-nacimiento-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-nacimiento" type="date" formControlName="fecha_nacimiento" [attr.aria-invalid]="!!fieldError('fecha_nacimiento')" />
         </div>
-        <div class="field field--full">
+        <div class="field field--full" [class.has-error]="fieldError('objetivo')">
           <label for="client-objetivo">Objetivo</label>
-          <input id="client-objetivo" formControlName="objetivo" placeholder="Ej. Pérdida de grasa, fuerza, movilidad" />
+          @if (fieldError('objetivo'); as mensaje) {
+            <p class="field-error" id="client-objetivo-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-objetivo" formControlName="objetivo" placeholder="Ej. Pérdida de grasa, fuerza, movilidad" [attr.aria-invalid]="!!fieldError('objetivo')" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('peso_kg')">
           <label for="client-peso">Peso (kg)</label>
-          <input id="client-peso" type="number" step="0.1" formControlName="peso_kg" />
+          @if (fieldError('peso_kg'); as mensaje) {
+            <p class="field-error" id="client-peso-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-peso" type="number" step="0.1" min="1" formControlName="peso_kg" [attr.aria-invalid]="!!fieldError('peso_kg')" />
         </div>
-        <div class="field">
+        <div class="field" [class.has-error]="fieldError('estatura_cm')">
           <label for="client-estatura">Estatura (cm)</label>
-          <input id="client-estatura" type="number" step="1" formControlName="estatura_cm" />
+          @if (fieldError('estatura_cm'); as mensaje) {
+            <p class="field-error" id="client-estatura-error" role="alert">{{ mensaje }}</p>
+          }
+          <input id="client-estatura" type="number" step="1" min="50" formControlName="estatura_cm" [attr.aria-invalid]="!!fieldError('estatura_cm')" />
         </div>
         <label class="check-field">
           <input type="checkbox" formControlName="is_active" />
@@ -218,13 +269,14 @@
         </label>
       </div>
     </div>
+    }
 
     <div class="form-actions">
       <button class="button button--secondary" type="button" (click)="closeModal()" [disabled]="saving()">
         Cancelar
       </button>
       <button class="button button--primary" type="submit" [disabled]="saving()">
-        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : 'Crear cliente' }}
+        {{ saving() ? 'Guardando...' : editing() ? 'Guardar cambios' : esCliente() ? 'Crear cliente' : 'Crear usuario' }}
       </button>
     </div>
   </form>
