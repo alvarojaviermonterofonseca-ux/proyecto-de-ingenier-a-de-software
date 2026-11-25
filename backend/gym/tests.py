@@ -4045,3 +4045,35 @@ class PlanesEntrenamientoConMusculosTests(EscenarioDosGimnasios):
         self.assertEqual(self.client.get(url).status_code, 200)
         self.assertEqual(self.client.get(f"/api/v1/ejercicios/{ejercicio.pk}/imagen/").status_code, 403)
         self.assertEqual(self._plan().status_code, 403)
+
+
+class AliasRecursosTests(APITestCase):
+    """Nombres visibles de los recursos del menú (archivo JSON común)."""
+
+    def setUp(self):
+        carpeta = TemporaryDirectory()
+        self.addCleanup(carpeta.cleanup)
+        archivo = patch("gym.resource_aliases.ALIASES_FILE", Path(carpeta.name) / "alias.json")
+        archivo.start()
+        self.addCleanup(archivo.stop)
+        get_user_model().objects.create_superuser(
+            username="plataforma_alias", email="alias@example.com", password="ClavePlataforma123"
+        )
+        self.assertTrue(
+            self.client.login(username="plataforma_alias", password="ClavePlataforma123")
+        )
+
+    def test_texto_vacio_quita_el_alias(self):
+        ruta = "/api/v1/resource-aliases/clientes/"
+        creado = self.client.put(ruta, {"nombre_actual": "Socios"}, format="json")
+        self.assertEqual(creado.status_code, 200, creado.data)
+        self.assertTrue(creado.data["tiene_alias"])
+
+        quitado = self.client.put(ruta, {"nombre_actual": ""}, format="json")
+        self.assertEqual(quitado.status_code, 200, quitado.data)
+        self.assertFalse(quitado.data["tiene_alias"])
+        self.assertEqual(quitado.data["nombre_actual"], "clientes")
+
+    def test_falta_nombre_actual_responde_400(self):
+        respuesta = self.client.put("/api/v1/resource-aliases/clientes/", {}, format="json")
+        self.assertEqual(respuesta.status_code, 400)
