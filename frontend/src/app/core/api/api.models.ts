@@ -339,6 +339,23 @@ export type WeekDay =
   | 'sabado'
   | 'domingo';
 
+/** Respuesta de ``PUT planes-entrenamiento/{id}/dias/{dia}/``. */
+export interface TrainingDaySaveResponse {
+  plan: TrainingPlan;
+  /** Ejercicios del día guardado, en orden. */
+  ejercicios: TrainingPlanExercise[];
+}
+
+/** Un ejercicio del día tal como se envía al guardarlo completo. */
+export interface TrainingDayExerciseInput {
+  ejercicio: number;
+  series: number | null;
+  repeticiones: number | null;
+  peso_kg: string | null;
+  descanso_segundos: number | null;
+  observaciones: string | null;
+}
+
 export interface TrainingPlanExercise {
   id: number;
   plan: number;
