@@ -14,7 +14,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models, transaction
-from django.db.models import F, Q
+from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.db.models.functions import Lower
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
@@ -72,6 +72,102 @@ def ruta_foto_registro(instance, filename):
         f"registros-comida/{timezone.now():%Y/%m}/"
         f"{uuid4().hex}{extension}"
     )
+
+
+def ruta_imagen_ejercicio(instance, filename):
+    """Nombre opaco para la imagen de referencia de un ejercicio."""
+    extension = Path(filename).suffix.lower()
+    if extension == ".jpeg":
+        extension = ".jpg"
+    if extension not in FOTO_REGISTRO_EXTENSIONES:
+        extension = ".img"
+    return f"ejercicios/{timezone.now():%Y/%m}/{uuid4().hex}{extension}"
+
+
+# Catálogo cerrado de músculos que se pueden marcar en ejercicios y rutinas.
+# Grupos musculares (códigos originales): se siguen aceptando para no romper
+# los datos ya guardados; en el modelo 3D equivalen a todos sus músculos.
+GRUPOS_MUSCULARES = {
+    "cuello": "Cuello",
+    "trapecio": "Trapecio",
+    "hombros": "Hombros",
+    "pecho": "Pecho",
+    "biceps": "Bíceps",
+    "triceps": "Tríceps",
+    "antebrazos": "Antebrazos",
+    "abdomen": "Abdomen",
+    "oblicuos": "Oblicuos",
+    "dorsales": "Dorsales",
+    "lumbares": "Lumbares",
+    "gluteos": "Glúteos",
+    "cuadriceps": "Cuádriceps",
+    "isquiotibiales": "Isquiotibiales",
+    "aductores": "Aductores",
+    "pantorrillas": "Pantorrillas",
+}
+
+# Músculos detallados: cada uno es una malla del modelo anatómico 3D del
+# frontend (``M_<codigo>_<lado>``). Valor: (nombre, grupo al que pertenece).
+MUSCULOS_DETALLADOS = {
+    "pectoral_mayor": ("Pectoral mayor", "pecho"),
+    "pectoral_menor": ("Pectoral menor", "pecho"),
+    "recto_abdominal": ("Recto abdominal", "abdomen"),
+    "oblicuo_externo": ("Oblicuo externo", "oblicuos"),
+    "oblicuo_interno": ("Oblicuo interno", "oblicuos"),
+    "serrato_anterior": ("Serrato anterior", "oblicuos"),
+    "intercostales": ("Intercostales", "pecho"),
+    "trapecio": ("Trapecio", "trapecio"),
+    "dorsal_ancho": ("Dorsal ancho", "dorsales"),
+    "romboides": ("Romboides", "dorsales"),
+    "redondo_mayor": ("Redondo mayor", "dorsales"),
+    "redondo_menor": ("Redondo menor", "dorsales"),
+    "infraespinoso": ("Infraespinoso", "dorsales"),
+    "erectores_espinales": ("Erectores espinales", "lumbares"),
+    "deltoides_anterior": ("Deltoides anterior", "hombros"),
+    "deltoides_lateral": ("Deltoides lateral", "hombros"),
+    "deltoides_posterior": ("Deltoides posterior", "hombros"),
+    "biceps_braquial": ("Bíceps braquial", "biceps"),
+    "braquial": ("Braquial", "biceps"),
+    "triceps_braquial": ("Tríceps braquial", "triceps"),
+    "braquiorradial": ("Braquiorradial", "antebrazos"),
+    "flexores_antebrazo": ("Flexores del antebrazo", "antebrazos"),
+    "extensores_antebrazo": ("Extensores del antebrazo", "antebrazos"),
+    "gluteo_mayor": ("Glúteo mayor", "gluteos"),
+    "gluteo_medio": ("Glúteo medio", "gluteos"),
+    "gluteo_menor": ("Glúteo menor", "gluteos"),
+    "recto_femoral": ("Recto femoral", "cuadriceps"),
+    "vasto_lateral": ("Vasto lateral", "cuadriceps"),
+    "vasto_medial": ("Vasto medial", "cuadriceps"),
+    "vasto_intermedio": ("Vasto intermedio", "cuadriceps"),
+    "sartorio": ("Sartorio", "cuadriceps"),
+    "aductores": ("Aductores", "aductores"),
+    "biceps_femoral": ("Bíceps femoral", "isquiotibiales"),
+    "semitendinoso": ("Semitendinoso", "isquiotibiales"),
+    "semimembranoso": ("Semimembranoso", "isquiotibiales"),
+    "gastrocnemio": ("Gastrocnemio", "pantorrillas"),
+    "soleo": ("Sóleo", "pantorrillas"),
+    "tibial_anterior": ("Tibial anterior", "pantorrillas"),
+    "esternocleidomastoideo": ("Esternocleidomastoideo", "cuello"),
+}
+
+# Todos los códigos válidos con su nombre (grupos + detallados).
+MUSCULOS = {
+    **GRUPOS_MUSCULARES,
+    **{codigo: nombre for codigo, (nombre, _grupo) in MUSCULOS_DETALLADOS.items()},
+}
+
+
+def validar_musculos(valor):
+    """Lista sin repetidos de códigos de ``MUSCULOS``."""
+    if valor in (None, ""):
+        return
+    if not isinstance(valor, list) or not all(isinstance(item, str) for item in valor):
+        raise ValidationError("Envíe una lista de músculos.")
+    desconocidos = sorted(set(valor) - set(MUSCULOS))
+    if desconocidos:
+        raise ValidationError(f"Músculos no reconocidos: {', '.join(desconocidos)}.")
+    if len(set(valor)) != len(valor):
+        raise ValidationError("Hay músculos repetidos.")
 
 
 def validar_foto_registro(archivo):
@@ -189,6 +285,234 @@ class BorradoLogicoSimple:
         return None
 
 
+METODOS_PAGO_POR_DEFECTO = (
+    {"nombre": "Efectivo", "tipo": "efectivo", "descripcion": "Pago en efectivo", "orden": 1, "requiere_referencia": False},
+    {"nombre": "Transferencia", "tipo": "transferencia", "descripcion": "Transferencia bancaria", "orden": 2, "requiere_referencia": True},
+    {"nombre": "Tarjeta débito", "tipo": "tarjeta", "descripcion": "Tarjeta de débito", "orden": 3, "requiere_referencia": True},
+    {"nombre": "Tarjeta crédito", "tipo": "tarjeta", "descripcion": "Tarjeta de crédito", "orden": 4, "requiere_referencia": True},
+    {"nombre": "Nequi", "tipo": "transferencia", "descripcion": "Nequi", "orden": 5, "requiere_referencia": True},
+    {"nombre": "DaviPlata", "tipo": "transferencia", "descripcion": "DaviPlata", "orden": 6, "requiere_referencia": True},
+    {"nombre": "Otro", "tipo": "otro", "descripcion": "Otro método de pago", "orden": 99, "requiere_referencia": False},
+)
+
+CATEGORIAS_GASTO_POR_DEFECTO = (
+    {"nombre": "Arriendo", "tipo": "arriendo", "descripcion": "Arriendo del local", "color": "#ef4444", "orden": 1},
+    {"nombre": "Servicios públicos", "tipo": "servicios_publicos", "descripcion": "Energía, agua, gas", "color": "#f97316", "orden": 2},
+    {"nombre": "Nómina", "tipo": "nomina", "descripcion": "Sueldos y prestaciones", "color": "#eab308", "orden": 3},
+    {"nombre": "Mantenimiento", "tipo": "mantenimiento", "descripcion": "Mantenimiento de equipos e instalaciones", "color": "#22c55e", "orden": 4},
+    {"nombre": "Equipamiento", "tipo": "equipamiento", "descripcion": "Compra de equipos y máquinas", "color": "#06b6d4", "orden": 5},
+    {"nombre": "Limpieza", "tipo": "limpieza", "descripcion": "Servicios de limpieza e insumos", "color": "#8b5cf6", "orden": 6},
+    {"nombre": "Publicidad", "tipo": "publicidad", "descripcion": "Marketing y publicidad", "color": "#ec4899", "orden": 7},
+    {"nombre": "Internet", "tipo": "internet", "descripcion": "Servicio de internet", "color": "#6366f1", "orden": 8},
+    {"nombre": "Otros", "tipo": "otro", "descripcion": "Gastos varios", "color": "#64748b", "orden": 99},
+)
+
+
+class Gimnasio(ModeloAuditable):
+    """Gimnasio cliente de la plataforma (tenant).
+
+    Cada usuario pertenece a un solo gimnasio y todos los datos operativos y
+    financieros cuelgan de él, directa o indirectamente. Los gimnasios los crea
+    el personal de la plataforma (superusuario de Django), nunca un usuario de
+    otro gimnasio.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    nombre = models.CharField(max_length=150)
+    codigo = models.SlugField(
+        max_length=50,
+        unique=True,
+        help_text="Identificador corto y único; los clientes lo usan al registrarse.",
+    )
+    nit = models.CharField(max_length=30, null=True, blank=True)
+    ciudad = models.CharField(max_length=100, null=True, blank=True)
+    direccion = models.CharField(max_length=255, null=True, blank=True)
+    telefono = models.CharField(max_length=30, null=True, blank=True)
+    correo = models.EmailField(max_length=191, null=True, blank=True)
+    # Configuración del centro de alertas.
+    dias_inactividad_alerta = models.PositiveSmallIntegerField(
+        default=15,
+        help_text="Días sin asistir para alertar que un cliente dejó de venir.",
+    )
+    limite_gastos_mensual = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Alerta cuando los gastos del mes superan este valor. Vacío: sin límite.",
+    )
+    porcentaje_caida_ingresos = models.PositiveSmallIntegerField(
+        default=30,
+        help_text="Alerta cuando los ingresos del mes caen este porcentaje frente al mes anterior.",
+    )
+
+    class Meta:
+        db_table = "gimnasios"
+        ordering = ["nombre", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(limite_gastos_mensual__isnull=True) | Q(limite_gastos_mensual__gt=0),
+                name="chk_gimnasio_limite_gastos",
+            ),
+            models.CheckConstraint(
+                condition=Q(porcentaje_caida_ingresos__lte=100),
+                name="chk_gimnasio_caida_ingresos",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.nombre = (self.nombre or "").strip()
+        self.codigo = (self.codigo or "").strip().lower()
+        for campo in ("nit", "ciudad", "direccion", "telefono"):
+            setattr(self, campo, normalizar_texto_opcional(getattr(self, campo)))
+        self.correo = normalizar_correo(self.correo) or None
+        if not 1 <= (self.dias_inactividad_alerta or 0) <= 365:
+            raise ValidationError(
+                {"dias_inactividad_alerta": "Debe estar entre 1 y 365 días."}
+            )
+        if not 1 <= (self.porcentaje_caida_ingresos or 0) <= 100:
+            raise ValidationError(
+                {"porcentaje_caida_ingresos": "Debe estar entre 1 y 100."}
+            )
+
+    def save(self, *args, **kwargs):
+        nuevo = self._state.adding
+        self.nombre = (self.nombre or "").strip()
+        self.codigo = (self.codigo or "").strip().lower()
+        with transaction.atomic():
+            resultado = super().save(*args, **kwargs)
+            if nuevo:
+                self.inicializar()
+        return resultado
+
+    def inicializar(self):
+        """Deja listo un gimnasio recién creado: catálogos y matriz de permisos."""
+        for datos in METODOS_PAGO_POR_DEFECTO:
+            MetodoPago.objects.get_or_create(
+                gimnasio=self, nombre=datos["nombre"], defaults=dict(datos)
+            )
+        for datos in CATEGORIAS_GASTO_POR_DEFECTO:
+            CategoriaGasto.objects.get_or_create(
+                gimnasio=self, nombre=datos["nombre"], defaults=dict(datos)
+            )
+        self.copiar_matriz_permisos()
+
+    def copiar_matriz_permisos(self):
+        """Copia la plantilla de permisos (filas sin gimnasio) a este gimnasio.
+
+        Cada gimnasio tiene su propia matriz rol-permiso: así un administrador
+        solo cambia lo que pueden hacer los roles dentro de su gimnasio.
+        """
+        RolPermiso.objects.bulk_create(
+            [
+                RolPermiso(gimnasio=self, rol_id=rol_id, permiso_id=permiso_id)
+                for rol_id, permiso_id in RolPermiso.objects.filter(
+                    gimnasio__isnull=True
+                ).values_list("rol_id", "permiso_id")
+            ],
+            ignore_conflicts=True,
+        )
+        RolRecurso.objects.bulk_create(
+            [
+                RolRecurso(gimnasio=self, rol_id=rol_id, recurso_id=recurso_id)
+                for rol_id, recurso_id in RolRecurso.objects.filter(
+                    gimnasio__isnull=True
+                ).values_list("rol_id", "recurso_id")
+            ],
+            ignore_conflicts=True,
+        )
+
+    @classmethod
+    def unico_activo_id(cls):
+        """Id del gimnasio si la plataforma tiene exactamente uno activo.
+
+        Permite que comandos y escrituras directas sin gimnasio sigan
+        funcionando en instalaciones de un solo gimnasio. Con dos o más no hay
+        una respuesta segura y se devuelve ``None``.
+        """
+        ids = list(
+            cls.objects.filter(is_active=True, deleted_at__isnull=True).values_list(
+                "pk", flat=True
+            )[:2]
+        )
+        return ids[0] if len(ids) == 1 else None
+
+    def __str__(self):
+        return self.nombre
+
+
+class AsignaGimnasioMixin:
+    """Resuelve el gimnasio de un registro antes de validarlo o guardarlo.
+
+    ``ORIGENES_GIMNASIO`` lista rutas (``cliente.usuario``, ``membresia``...)
+    hacia un objeto con ``gimnasio_id``. Si alguna resuelve, manda sobre lo que
+    traiga el registro: un pago siempre es del gimnasio de su cliente. Si no,
+    se usa el gimnasio del actor y, como último recurso, el único gimnasio
+    activo de la plataforma.
+    """
+
+    ORIGENES_GIMNASIO = ()
+
+    def asignar_gimnasio(self, actor=None):
+        for ruta in self.ORIGENES_GIMNASIO:
+            origen = self
+            for parte in ruta.split("."):
+                if origen is None:
+                    break
+                if not getattr(origen, f"{parte}_id", True):
+                    origen = None
+                    break
+                origen = getattr(origen, parte, None)
+            gimnasio_id = getattr(origen, "gimnasio_id", None)
+            if gimnasio_id:
+                self.gimnasio_id = gimnasio_id
+                return
+        if self.gimnasio_id:
+            return
+        gimnasio_id = getattr(actor, "gimnasio_id", None) if isinstance(actor, Usuario) else None
+        self.gimnasio_id = gimnasio_id or Gimnasio.unico_activo_id()
+
+    def clean_fields(self, exclude=None):
+        # El gimnasio se resuelve antes de validar los campos obligatorios.
+        self.asignar_gimnasio()
+        return super().clean_fields(exclude=exclude)
+
+    def clean(self):
+        super().clean()
+        self.validar_relaciones_del_gimnasio()
+
+    def validar_relaciones_del_gimnasio(self):
+        """Toda relación del registro debe ser del mismo gimnasio.
+
+        La API ya filtra las claves foráneas por gimnasio; esto protege
+        también las escrituras desde comandos o la consola.
+        """
+        if not self.gimnasio_id:
+            return
+        errores = {}
+        for campo in self._meta.concrete_fields:
+            if not campo.is_relation or campo.name == "gimnasio":
+                continue
+            if not getattr(self, campo.attname, None):
+                continue
+            relacionado = getattr(self, campo.name)
+            gimnasio_id = getattr(relacionado, "gimnasio_id", None)
+            if gimnasio_id is None and hasattr(relacionado, "usuario_id"):
+                gimnasio_id = getattr(relacionado.usuario, "gimnasio_id", None)
+            if gimnasio_id is not None and gimnasio_id != self.gimnasio_id:
+                errores[campo.name] = "Pertenece a otro gimnasio."
+        if errores:
+            raise ValidationError(errores)
+
+    def _gimnasio_antes_de_guardar(self):
+        self.asignar_gimnasio()
+        if not self.gimnasio_id:
+            raise ValidationError(
+                {"gimnasio": "Indique a qué gimnasio pertenece el registro."}
+            )
+
+
 class Recurso(BorradoLogicoSimple, models.Model):
     """Recurso protegible del sistema.
 
@@ -235,6 +559,16 @@ class Rol(BorradoLogicoSimple, models.Model):
     # como catálogo de los roles base que tienen un perfil asociado.
     nombre = models.CharField(max_length=50, unique=True)
     descripcion = models.CharField(max_length=255, null=True, blank=True)
+    # Vacío en los roles del sistema (compartidos por todos los gimnasios). Un
+    # rol personalizado pertenece al gimnasio que lo creó y solo se ve allí.
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.CASCADE,
+        related_name="roles_propios",
+        db_column="gimnasio_id",
+        null=True,
+        blank=True,
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -249,6 +583,10 @@ class Rol(BorradoLogicoSimple, models.Model):
         db_table = "roles"
         indexes = [models.Index(fields=["is_active"], name="idx_roles_active")]
         ordering = ["nombre"]
+
+    @property
+    def es_del_sistema(self):
+        return self.gimnasio_id is None
 
     def propagar_borrado_logico(self):
         # Un rol inactivo deja de aportar permisos; sus asignaciones quedan
@@ -315,8 +653,10 @@ class Permiso(BorradoLogicoSimple, models.Model):
         resultado = super().save(*args, **kwargs)
         # Si se reclasifica un permiso ya concedido, sus roles también deben
         # quedar vinculados al nuevo recurso antes de poder usarlo.
-        for rol_id in self.roles_asignados.values_list("rol_id", flat=True):
-            RolRecurso.objects.get_or_create(rol_id=rol_id, recurso=recurso)
+        for rol_id, gimnasio_id in self.roles_asignados.values_list("rol_id", "gimnasio_id"):
+            RolRecurso.objects.get_or_create(
+                rol_id=rol_id, recurso=recurso, gimnasio_id=gimnasio_id
+            )
         return resultado
 
     def __str__(self):
@@ -331,12 +671,24 @@ class RolPermiso(models.Model):
     permiso = models.ForeignKey(
         Permiso, on_delete=models.CASCADE, related_name="roles_asignados", db_column="permiso_id"
     )
+    # Gimnasio al que aplica la concesión. Las filas sin gimnasio son la
+    # plantilla que se copia a cada gimnasio nuevo y no conceden nada.
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.CASCADE,
+        related_name="rol_permisos",
+        db_column="gimnasio_id",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "rol_permiso"
         constraints = [
-            models.UniqueConstraint(fields=["rol", "permiso"], name="uq_rol_permiso")
+            models.UniqueConstraint(
+                fields=["gimnasio", "rol", "permiso"], name="uq_gimnasio_rol_permiso"
+            )
         ]
         indexes = [
             models.Index(fields=["rol"], name="idx_rolpermiso_rol"),
@@ -350,7 +702,9 @@ class RolPermiso(models.Model):
     def save(self, *args, **kwargs):
         resultado = super().save(*args, **kwargs)
         recurso, _ = Recurso.objects.get_or_create(nombre=self.permiso.recurso)
-        RolRecurso.objects.get_or_create(rol=self.rol, recurso=recurso)
+        RolRecurso.objects.get_or_create(
+            rol=self.rol, recurso=recurso, gimnasio_id=self.gimnasio_id
+        )
         return resultado
 
 
@@ -372,12 +726,22 @@ class RolRecurso(models.Model):
         related_name="roles_asignados",
         db_column="recurso_id",
     )
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.CASCADE,
+        related_name="rol_recursos",
+        db_column="gimnasio_id",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "rol_has_recurso"
         constraints = [
-            models.UniqueConstraint(fields=["rol", "recurso"], name="uq_rol_recurso")
+            models.UniqueConstraint(
+                fields=["gimnasio", "rol", "recurso"], name="uq_gimnasio_rol_recurso"
+            )
         ]
         indexes = [
             models.Index(fields=["rol"], name="idx_rolrecurso_rol"),
@@ -391,6 +755,13 @@ class RolRecurso(models.Model):
 
 class Usuario(ModeloAuditable):
     id = models.BigAutoField(primary_key=True)
+    # Cada usuario pertenece a un único gimnasio; de él cuelgan sus datos.
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="usuarios",
+        db_column="gimnasio_id",
+    )
     # ``rol`` es el rol principal y se conserva para login/perfiles existentes.
     rol = models.ForeignKey(Rol, on_delete=models.PROTECT, related_name="usuarios", db_column="rol_id")
     roles = models.ManyToManyField(
@@ -414,11 +785,18 @@ class Usuario(ModeloAuditable):
             models.UniqueConstraint(Lower("username"), name="uq_usuario_username_lower"),
         ]
         indexes = [
+            models.Index(fields=["gimnasio", "is_active"], name="idx_usuarios_gimnasio"),
             models.Index(fields=["rol", "is_active"], name="idx_usuarios_rol_activo"),
             models.Index(fields=["deleted_at"], name="idx_usuarios_deleted_at"),
             models.Index(fields=["nombre"], name="idx_usuarios_nombre"),
         ]
         ordering = ["nombre", "id"]
+
+    def clean_fields(self, exclude=None):
+        # En una plataforma de un solo gimnasio, el usuario pertenece a ese.
+        if not self.gimnasio_id:
+            self.gimnasio_id = Gimnasio.unico_activo_id()
+        return super().clean_fields(exclude=exclude)
 
     def clean(self):
         super().clean()
@@ -432,6 +810,12 @@ class Usuario(ModeloAuditable):
         self.correo = normalizar_correo(self.correo)
         self.username = normalizar_username(self.username)
         self.telefono = normalizar_texto_opcional(self.telefono)
+        if not self.gimnasio_id:
+            self.gimnasio_id = Gimnasio.unico_activo_id()
+            if not self.gimnasio_id:
+                raise ValidationError(
+                    {"gimnasio": "Indique a qué gimnasio pertenece el usuario."}
+                )
         return super().save(*args, **kwargs)
 
     def liberar_restricciones_unicas(self):
@@ -485,7 +869,9 @@ class Usuario(ModeloAuditable):
         return (
             Permiso.objects.filter(
                 is_active=True,
+                roles_asignados__gimnasio_id=self.gimnasio_id,
                 roles_asignados__rol__in=self.roles_efectivos(),
+                roles_asignados__rol__recursos_asignados__gimnasio_id=self.gimnasio_id,
                 roles_asignados__rol__recursos_asignados__recurso_id=F("recurso_catalogo_id"),
                 roles_asignados__rol__recursos_asignados__recurso__is_active=True,
             )
@@ -500,7 +886,9 @@ class Usuario(ModeloAuditable):
             Permiso.objects.filter(
                 codigo=codigo,
                 is_active=True,
+                roles_asignados__gimnasio_id=self.gimnasio_id,
                 roles_asignados__rol__in=self.roles_efectivos(),
+                roles_asignados__rol__recursos_asignados__gimnasio_id=self.gimnasio_id,
                 roles_asignados__rol__recursos_asignados__recurso_id=F("recurso_catalogo_id"),
                 roles_asignados__rol__recursos_asignados__recurso__is_active=True,
             )
@@ -513,6 +901,7 @@ class Usuario(ModeloAuditable):
             return Recurso.objects.none()
         return Recurso.objects.filter(
             is_active=True,
+            roles_asignados__gimnasio_id=self.gimnasio_id,
             roles_asignados__rol__in=self.roles_efectivos(),
         ).distinct()
 
@@ -524,6 +913,37 @@ class Usuario(ModeloAuditable):
             defaults={"activo": activo, "asignado_por": asignado_por},
         )
         return asignacion
+
+    def cambiar_rol_principal(self, nuevo_rol):
+        """Cambia el rol principal y adapta el perfil tipado.
+
+        El perfil anterior solo se elimina cuando no tiene registros
+        protegidos. Si los tiene, se propaga ``ProtectedError`` para que la
+        API explique que primero deben reasignarse o eliminarse esos datos.
+        """
+        if not self.pk or nuevo_rol.pk == self.rol_id:
+            return False
+
+        perfil_anterior = None
+        if self.rol.nombre in PERFILES_POR_ROL:
+            try:
+                perfil_anterior = getattr(self, self.rol.nombre)
+            except ObjectDoesNotExist:
+                perfil_anterior = None
+        if perfil_anterior is not None:
+            perfil_anterior.delete()
+
+        self.rol = nuevo_rol
+        self.save(update_fields=["rol", "updated_at"])
+
+        modelo_perfil = PERFILES_POR_ROL.get(nuevo_rol.nombre)
+        if modelo_perfil is not None and not modelo_perfil.objects.filter(
+            pk=self.pk
+        ).exists():
+            perfil = modelo_perfil(usuario=self)
+            perfil.full_clean()
+            perfil.save()
+        return True
 
     @property
     def is_authenticated(self):
@@ -672,6 +1092,30 @@ class Cliente(PerfilBase):
     def clean(self):
         self._normalizar_campos()
         super().clean()
+        errores = {}
+        if self.numero_documento:
+            # Mismo criterio que ``uq_cliente_documento_lower``, pero con un
+            # mensaje por campo en lugar del nombre interno de la restricción.
+            if self.tipo_documento:
+                repetido = Cliente.objects.filter(
+                    tipo_documento__iexact=self.tipo_documento,
+                    numero_documento__iexact=self.numero_documento,
+                )
+            else:
+                repetido = Cliente.objects.filter(
+                    tipo_documento__isnull=True,
+                    numero_documento__iexact=self.numero_documento,
+                )
+            if repetido.exclude(pk=self.pk).exists():
+                errores["numero_documento"] = "Ya existe un cliente con este tipo y número de documento."
+        if self.peso_kg is not None and self.peso_kg <= 0:
+            errores["peso_kg"] = "El peso debe ser mayor que cero."
+        if self.estatura_cm is not None and self.estatura_cm <= 0:
+            errores["estatura_cm"] = "La estatura debe ser mayor que cero."
+        if self.fecha_nacimiento and self.fecha_nacimiento > timezone.localdate():
+            errores["fecha_nacimiento"] = "La fecha de nacimiento no puede ser futura."
+        if errores:
+            raise ValidationError(errores)
 
     def save(self, *args, **kwargs):
         self._normalizar_campos()
@@ -819,6 +1263,17 @@ class Recepcionista(PerfilBase):
 
     def __str__(self):
         return self.usuario.nombre
+
+
+# Perfil que corresponde a cada rol base. Los roles personalizados no tienen
+# perfil propio; al cambiar a uno de ellos solo se conserva la identidad.
+PERFILES_POR_ROL = {
+    Rol.Nombre.CLIENTE: Cliente,
+    Rol.Nombre.ENTRENADOR: Entrenador,
+    Rol.Nombre.TERAPEUTA: Terapeuta,
+    Rol.Nombre.RECEPCIONISTA: Recepcionista,
+    Rol.Nombre.ADMINISTRADOR: Administrador,
+}
 
 
 class ClienteEntrenador(ModeloAuditable):
@@ -989,13 +1444,20 @@ class ClienteTerapeuta(ModeloAuditable):
         return f"{self.cliente} - {self.terapeuta}"
 
 
-class Asistencia(ModeloAuditable):
+class Asistencia(AsignaGimnasioMixin, ModeloAuditable):
     class MetodoEntrada(models.TextChoices):
         QR = "qr", "Código QR"
         FACIAL = "facial", "Reconocimiento facial"
         MANUAL = "manual", "Manual"
 
     id = models.BigAutoField(primary_key=True)
+    ORIGENES_GIMNASIO = ("cliente.usuario",)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="asistencias",
+        db_column="gimnasio_id",
+    )
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="asistencias", db_column="cliente_id")
     entrada_at = models.DateTimeField()
     salida_at = models.DateTimeField(null=True, blank=True)
@@ -1011,6 +1473,7 @@ class Asistencia(ModeloAuditable):
             )
         ]
         indexes = [
+            models.Index(fields=["gimnasio", "entrada_at"], name="idx_asistencia_gimnasio"),
             models.Index(fields=["cliente", "entrada_at"], name="idx_asistencia_cliente_fecha"),
             models.Index(fields=["entrada_at"], name="idx_asistencia_fecha"),
             models.Index(fields=["cliente", "salida_at"], name="idx_asistencia_abierta"),
@@ -1037,6 +1500,7 @@ class Asistencia(ModeloAuditable):
             )
 
     def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
         self.identificador_evento = normalizar_texto_opcional(self.identificador_evento)
         return super().save(*args, **kwargs)
 
@@ -1083,16 +1547,43 @@ class Entrenamiento(ModeloAuditable):
         return super().save(*args, **kwargs)
 
 
-class Ejercicio(ModeloAuditable):
+class Ejercicio(AsignaGimnasioMixin, ModeloAuditable):
     id = models.BigAutoField(primary_key=True)
-    nombre = models.CharField(max_length=150, unique=True)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="ejercicios",
+        db_column="gimnasio_id",
+    )
+    nombre = models.CharField(max_length=150)
     descripcion = models.TextField(null=True, blank=True)
     grupo_muscular = models.CharField(max_length=100, null=True, blank=True)
+    musculos = models.JSONField(default=list, blank=True, validators=[validar_musculos])
+    # Imagen de referencia que sube el entrenador. Es privada: la API la
+    # entrega por un endpoint autenticado, igual que las fotos de comidas.
+    imagen = models.ImageField(
+        upload_to=ruta_imagen_ejercicio,
+        storage=AlmacenamientoFotosPrivadas(),
+        validators=[validar_foto_registro],
+        max_length=255,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "ejercicios"
-        indexes = [models.Index(fields=["grupo_muscular"], name="idx_ejercicio_grupo")]
+        constraints = [
+            models.UniqueConstraint(fields=["gimnasio", "nombre"], name="uq_ejercicio_gimnasio_nombre")
+        ]
+        indexes = [
+            models.Index(fields=["gimnasio", "is_active"], name="idx_ejercicio_gimnasio"),
+            models.Index(fields=["grupo_muscular"], name="idx_ejercicio_grupo"),
+        ]
         ordering = ["nombre"]
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nombre
@@ -1110,6 +1601,8 @@ class PlanEntrenamiento(ModeloAuditable):
     fecha_fin = models.DateField(null=True, blank=True)
     activo = models.BooleanField(default=True)
     observaciones = models.TextField(null=True, blank=True)
+    # Rutina por día: {"lunes": {"titulo": "Empuje", "musculos": ["pecho", ...]}}.
+    rutina = models.JSONField(default=dict, blank=True)
     ejercicios = models.ManyToManyField(Ejercicio, through="PlanEntrenamientoEjercicio", related_name="planes_entrenamiento")
 
     class Meta:
@@ -1126,8 +1619,33 @@ class PlanEntrenamiento(ModeloAuditable):
             models.Index(fields=["cliente", "activo", "fecha_inicio", "fecha_fin"], name="idx_pet_vigencia"),
         ]
 
+    DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+
+    def _validar_rutina(self):
+        rutina = self.rutina or {}
+        if not isinstance(rutina, dict):
+            raise ValidationError({"rutina": "La rutina debe ser un objeto por día."})
+        limpia = {}
+        for dia, datos in rutina.items():
+            if dia not in self.DIAS:
+                raise ValidationError({"rutina": f"Día no válido: {dia}."})
+            if not isinstance(datos, dict):
+                raise ValidationError({"rutina": f"Datos no válidos para {dia}."})
+            titulo = str(datos.get("titulo") or "").strip()
+            if len(titulo) > 60:
+                raise ValidationError({"rutina": "El título de cada día admite 60 caracteres."})
+            musculos = datos.get("musculos") or []
+            try:
+                validar_musculos(musculos)
+            except ValidationError as error:
+                raise ValidationError({"rutina": f"{dia}: {error.messages[0]}"}) from error
+            if titulo or musculos:
+                limpia[dia] = {"titulo": titulo, "musculos": musculos}
+        self.rutina = limpia
+
     def clean(self):
         super().clean()
+        self._validar_rutina()
         if self.deleted_at is not None or not self.cliente_id or not self.entrenador_id:
             return
         if not ClienteEntrenador.entrenador_asignado(self.cliente_id, self.entrenador_id):
@@ -1427,3 +1945,642 @@ class EventoAuditoria(models.Model):
 
     def __str__(self):
         return f"{self.accion} {self.recurso} {self.objeto_id or ''}".strip()
+
+
+# =============================================================================
+# MODELOS FINANCIEROS Y ADMINISTRATIVOS
+# =============================================================================
+
+class MetodoPago(AsignaGimnasioMixin, ModeloAuditable):
+    """Catálogo de métodos de pago disponibles."""
+
+    class Tipo(models.TextChoices):
+        EFECTIVO = "efectivo", "Efectivo"
+        TRANSFERENCIA = "transferencia", "Transferencia"
+        TARJETA = "tarjeta", "Tarjeta"
+        OTRO = "otro", "Otro"
+
+    id = models.BigAutoField(primary_key=True)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="metodos_pago",
+        db_column="gimnasio_id",
+    )
+    nombre = models.CharField(max_length=50)
+    tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.OTRO)
+    descripcion = models.CharField(max_length=255, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    requiere_referencia = models.BooleanField(default=False)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "metodos_pago"
+        ordering = ["orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["gimnasio", "nombre"], name="uq_metodo_pago_gimnasio_nombre")
+        ]
+        indexes = [
+            models.Index(fields=["gimnasio", "is_active"], name="idx_metodo_pago_gimnasio"),
+            models.Index(fields=["is_active"], name="idx_metodo_pago_active"),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.nombre = (self.nombre or "").strip()
+        self.descripcion = normalizar_texto_opcional(self.descripcion)
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.nombre = (self.nombre or "").strip()
+        self.descripcion = normalizar_texto_opcional(self.descripcion)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.nombre
+
+
+class CategoriaGasto(AsignaGimnasioMixin, ModeloAuditable):
+    """Categorías para clasificar los gastos del gimnasio."""
+
+    class Tipo(models.TextChoices):
+        ARRIENDO = "arriendo", "Arriendo"
+        SERVICIOS_PUBLICOS = "servicios_publicos", "Servicios públicos"
+        NOMINA = "nomina", "Nómina"
+        MANTENIMIENTO = "mantenimiento", "Mantenimiento"
+        EQUIPAMIENTO = "equipamiento", "Equipamiento"
+        LIMPIEZA = "limpieza", "Limpieza"
+        PUBLICIDAD = "publicidad", "Publicidad"
+        INTERNET = "internet", "Internet"
+        OTRO = "otro", "Otro"
+
+    id = models.BigAutoField(primary_key=True)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="categorias_gasto",
+        db_column="gimnasio_id",
+    )
+    nombre = models.CharField(max_length=50)
+    tipo = models.CharField(max_length=30, choices=Tipo.choices, default=Tipo.OTRO)
+    descripcion = models.CharField(max_length=255, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    color = models.CharField(max_length=7, default="#6366f1", help_text="Color hex para gráficas")
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "categorias_gasto"
+        ordering = ["orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["gimnasio", "nombre"], name="uq_categoria_gasto_gimnasio_nombre")
+        ]
+        indexes = [
+            models.Index(fields=["gimnasio", "is_active"], name="idx_categoria_gimnasio"),
+            models.Index(fields=["is_active"], name="idx_categoria_gasto_active"),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.nombre = (self.nombre or "").strip()
+        self.descripcion = normalizar_texto_opcional(self.descripcion)
+        if self.color and not self.color.startswith("#"):
+            self.color = f"#{self.color}"
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.nombre = (self.nombre or "").strip()
+        self.descripcion = normalizar_texto_opcional(self.descripcion)
+        if self.color and not self.color.startswith("#"):
+            self.color = f"#{self.color}"
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.nombre
+
+
+class Pago(AsignaGimnasioMixin, ModeloAuditable):
+    """Registro de pagos/ingresos recibidos de los clientes."""
+
+    class Estado(models.TextChoices):
+        COMPLETADO = "completado", "Completado"
+        PENDIENTE = "pendiente", "Pendiente"
+        FALLIDO = "fallido", "Fallido"
+        REEMBOLSADO = "reembolsado", "Reembolsado"
+
+    class Concepto(models.TextChoices):
+        MEMBRESIA = "membresia", "Membresía"
+        RENOVACION = "renovacion", "Renovación"
+        MATRICULA = "matricula", "Matrícula"
+        ENTRENAMIENTO_PERSONAL = "entrenamiento_personal", "Entrenamiento personal"
+        PLAN_ALIMENTACION = "plan_alimentacion", "Plan de alimentación"
+        PRODUCTO = "producto", "Producto"
+        OTRO = "otro", "Otro"
+
+    id = models.BigAutoField(primary_key=True)
+    ORIGENES_GIMNASIO = ("cliente.usuario",)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="pagos",
+        db_column="gimnasio_id",
+    )
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="pagos",
+        db_column="cliente_id",
+    )
+    concepto = models.CharField(max_length=30, choices=Concepto.choices)
+    concepto_detalle = models.CharField(max_length=255, null=True, blank=True)
+    membresia = models.ForeignKey(
+        "Membresia",
+        on_delete=models.SET_NULL,
+        related_name="pagos",
+        db_column="membresia_id",
+        null=True,
+        blank=True,
+    )
+    fecha_pago = models.DateTimeField(default=timezone.now)
+    valor = models.DecimalField(max_digits=12, decimal_places=2)
+    metodo_pago = models.ForeignKey(
+        MetodoPago,
+        on_delete=models.PROTECT,
+        related_name="pagos",
+        db_column="metodo_pago_id",
+    )
+    referencia = models.CharField(max_length=100, null=True, blank=True)
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.COMPLETADO,
+    )
+    registrado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.PROTECT,
+        related_name="pagos_registrados",
+        db_column="registrado_por_id",
+    )
+    notas = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "pagos"
+        indexes = [
+            models.Index(fields=["gimnasio", "fecha_pago"], name="idx_pago_gimnasio_fecha"),
+            models.Index(fields=["cliente", "fecha_pago"], name="idx_pago_cliente_fecha"),
+            models.Index(fields=["fecha_pago"], name="idx_pago_fecha"),
+            models.Index(fields=["estado"], name="idx_pago_estado"),
+            models.Index(fields=["concepto"], name="idx_pago_concepto"),
+            models.Index(fields=["metodo_pago"], name="idx_pago_metodo"),
+            models.Index(fields=["registrado_por", "fecha_pago"], name="idx_pago_registrador_fecha"),
+        ]
+        ordering = ["-fecha_pago", "-pk"]
+
+    def clean(self):
+        super().clean()
+        if self.deleted_at is not None or not self.cliente_id or self.valor is None:
+            return
+        if self.valor <= 0:
+            raise ValidationError({"valor": "El valor del pago debe ser mayor a cero."})
+        if self.estado == self.Estado.COMPLETADO and self.fecha_pago > timezone.now():
+            raise ValidationError({"fecha_pago": "No se puede completar un pago con fecha futura."})
+        if self.membresia_id and self.membresia.cliente_id != self.cliente_id:
+            raise ValidationError(
+                {"membresia": "La membresía no pertenece al cliente del pago."}
+            )
+        self.concepto_detalle = normalizar_texto_opcional(self.concepto_detalle)
+        self.referencia = normalizar_texto_opcional(self.referencia)
+        self.notas = normalizar_texto_opcional(self.notas)
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.concepto_detalle = normalizar_texto_opcional(self.concepto_detalle)
+        self.referencia = normalizar_texto_opcional(self.referencia)
+        self.notas = normalizar_texto_opcional(self.notas)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.cliente} - ${self.valor:,.0f} - {self.get_concepto_display()}"
+
+
+class Gasto(AsignaGimnasioMixin, ModeloAuditable):
+    """Registro de gastos del gimnasio."""
+
+    class Estado(models.TextChoices):
+        REGISTRADO = "registrado", "Registrado"
+        APROBADO = "aprobado", "Aprobado"
+        PAGADO = "pagado", "Pagado"
+        CANCELADO = "cancelado", "Cancelado"
+
+    id = models.BigAutoField(primary_key=True)
+    ORIGENES_GIMNASIO = ("categoria", "registrado_por")
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="gastos",
+        db_column="gimnasio_id",
+    )
+    descripcion = models.CharField(max_length=255)
+    categoria = models.ForeignKey(
+        CategoriaGasto,
+        on_delete=models.PROTECT,
+        related_name="gastos",
+        db_column="categoria_id",
+    )
+    valor = models.DecimalField(max_digits=12, decimal_places=2)
+    fecha = models.DateField()
+    metodo_pago = models.ForeignKey(
+        MetodoPago,
+        on_delete=models.PROTECT,
+        related_name="gastos",
+        db_column="metodo_pago_id",
+    )
+    referencia = models.CharField(max_length=100, null=True, blank=True)
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.REGISTRADO,
+    )
+    registrado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.PROTECT,
+        related_name="gastos_registrados",
+        db_column="registrado_por_id",
+    )
+    aprobado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        related_name="gastos_aprobados",
+        db_column="aprobado_por_id",
+        null=True,
+        blank=True,
+    )
+    fecha_aprobacion = models.DateTimeField(null=True, blank=True)
+    observaciones = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "gastos"
+        indexes = [
+            models.Index(fields=["gimnasio", "fecha"], name="idx_gasto_gimnasio_fecha"),
+            models.Index(fields=["categoria", "fecha"], name="idx_gasto_cat_fecha"),
+            models.Index(fields=["fecha"], name="idx_gasto_fecha"),
+            models.Index(fields=["estado"], name="idx_gasto_estado"),
+            models.Index(fields=["registrado_por", "fecha"], name="idx_gasto_registrador_fecha"),
+        ]
+        ordering = ["-fecha", "-pk"]
+
+    def clean(self):
+        super().clean()
+        if self.deleted_at is not None or self.valor is None:
+            return
+        if self.valor <= 0:
+            raise ValidationError({"valor": "El valor del gasto debe ser mayor a cero."})
+        self.descripcion = (self.descripcion or "").strip()
+        self.referencia = normalizar_texto_opcional(self.referencia)
+        self.observaciones = normalizar_texto_opcional(self.observaciones)
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.descripcion = (self.descripcion or "").strip()
+        self.referencia = normalizar_texto_opcional(self.referencia)
+        self.observaciones = normalizar_texto_opcional(self.observaciones)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.categoria.nombre} - ${self.valor:,.0f} - {self.fecha}"
+
+
+class Membresia(AsignaGimnasioMixin, ModeloAuditable):
+    """Membresías de los clientes con vigencia y estado."""
+
+    class Estado(models.TextChoices):
+        ACTIVA = "activa", "Activa"
+        VENCIDA = "vencida", "Vencida"
+        POR_VENCER = "por_vencer", "Por vencer"
+        CANCELADA = "cancelada", "Cancelada"
+        CONGELADA = "congelada", "Congelada"
+
+    class Tipo(models.TextChoices):
+        MENSUAL = "mensual", "Mensual"
+        TRIMESTRAL = "trimestral", "Trimestral"
+        SEMESTRAL = "semestral", "Semestral"
+        ANUAL = "anual", "Anual"
+        VISITA = "visita", "Visita única"
+        PERSONALIZADA = "personalizada", "Personalizada"
+
+    id = models.BigAutoField(primary_key=True)
+    ORIGENES_GIMNASIO = ("cliente.usuario",)
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="membresias",
+        db_column="gimnasio_id",
+    )
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="membresias",
+        db_column="cliente_id",
+    )
+    tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.MENSUAL)
+    nombre = models.CharField(max_length=100, help_text="Ej: Membresía Mensual Estándar")
+    precio = models.DecimalField(max_digits=10, decimal_places=2)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    fecha_ultima_renovacion = models.DateField(null=True, blank=True)
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.ACTIVA,
+    )
+    dias_congelados = models.PositiveIntegerField(default=0)
+    renovacion_automatica = models.BooleanField(default=False)
+    entrenador_asignado = models.ForeignKey(
+        Entrenador,
+        on_delete=models.SET_NULL,
+        related_name="membresias_asignadas",
+        db_column="entrenador_asignado_id",
+        null=True,
+        blank=True,
+    )
+    registrado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.PROTECT,
+        related_name="membresias_registradas",
+        db_column="registrado_por_id",
+    )
+    observaciones = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "membresias"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(fecha_fin__gte=F("fecha_inicio")),
+                name="chk_membresia_fechas",
+            ),
+            models.CheckConstraint(condition=Q(precio__gte=0), name="chk_membresia_precio"),
+        ]
+        indexes = [
+            models.Index(fields=["gimnasio", "estado"], name="idx_membresia_gimnasio"),
+            models.Index(fields=["cliente", "estado"], name="idx_membresia_cliente_estado"),
+            models.Index(fields=["fecha_fin", "estado"], name="idx_membresia_vencimiento"),
+            models.Index(fields=["estado"], name="idx_membresia_estado"),
+            models.Index(fields=["tipo"], name="idx_membresia_tipo"),
+        ]
+        ordering = ["-fecha_inicio", "-pk"]
+
+    def clean(self):
+        super().clean()
+        if self.deleted_at is not None or not self.cliente_id or self.precio is None:
+            return
+        if self.precio < 0:
+            raise ValidationError({"precio": "El precio no puede ser negativo."})
+        if self.fecha_fin and self.fecha_inicio and self.fecha_fin < self.fecha_inicio:
+            raise ValidationError({"fecha_fin": "La fecha fin no puede ser anterior a la fecha inicio."})
+        self.nombre = (self.nombre or "").strip()
+        self.observaciones = normalizar_texto_opcional(self.observaciones)
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.nombre = (self.nombre or "").strip()
+        self.observaciones = normalizar_texto_opcional(self.observaciones)
+        # Actualizar estado automáticamente basado en fechas
+        if self.pk is None or self._state.adding:
+            self.actualizar_estado_por_fecha()
+        return super().save(*args, **kwargs)
+
+    def actualizar_estado_por_fecha(self):
+        """Actualiza el estado basado en la fecha actual."""
+        hoy = timezone.localdate()
+        if self.estado in (self.Estado.CANCELADA, self.Estado.CONGELADA):
+            return
+        if self.fecha_fin < hoy:
+            self.estado = self.Estado.VENCIDA
+        elif self.fecha_fin <= hoy + timedelta(days=7):
+            self.estado = self.Estado.POR_VENCER
+        else:
+            self.estado = self.Estado.ACTIVA
+
+    @classmethod
+    def sincronizar_estados(cls, hoy=None, gimnasio_id=None):
+        """Pone al día el estado de todas las membresías según ``fecha_fin``.
+
+        ``save()`` solo calcula el estado al crear, así que sin esta pasada una
+        membresía activa nunca llegaría a "por vencer" ni a "vencida". No toca
+        las canceladas. Una congelada conserva su estado mientras siga dentro
+        de su vigencia (que ``congelar`` ya extendió) y vence al pasar su
+        fecha de fin. Devuelve cuántas filas cambió.
+        """
+        hoy = hoy or timezone.localdate()
+        limite = hoy + timedelta(days=7)
+        ahora = timezone.now()
+        no_canceladas = cls.objects.filter(deleted_at__isnull=True).exclude(
+            estado=cls.Estado.CANCELADA
+        )
+        if gimnasio_id:
+            no_canceladas = no_canceladas.filter(gimnasio_id=gimnasio_id)
+        vigentes = no_canceladas.exclude(estado=cls.Estado.CONGELADA)
+        return {
+            "vencidas": no_canceladas.filter(fecha_fin__lt=hoy)
+            .exclude(estado=cls.Estado.VENCIDA)
+            .update(estado=cls.Estado.VENCIDA, updated_at=ahora),
+            "por_vencer": vigentes.filter(fecha_fin__gte=hoy, fecha_fin__lte=limite)
+            .exclude(estado=cls.Estado.POR_VENCER)
+            .update(estado=cls.Estado.POR_VENCER, updated_at=ahora),
+            "activas": vigentes.filter(fecha_fin__gt=limite)
+            .exclude(estado=cls.Estado.ACTIVA)
+            .update(estado=cls.Estado.ACTIVA, updated_at=ahora),
+        }
+
+    def dias_para_vencer(self):
+        """Retorna días restantes para vencer (negativo si ya venció)."""
+        hoy = timezone.localdate()
+        return (self.fecha_fin - hoy).days
+
+    def __str__(self):
+        return f"{self.cliente} - {self.nombre} ({self.get_estado_display()})"
+
+
+class AlertaQuerySet(models.QuerySet):
+    def por_prioridad(self):
+        """Ordena de crítica a baja.
+
+        ``prioridad`` es texto: ordenar por la columna la deja en orden
+        alfabético (media, crítica, baja, alta).
+        """
+        return self.annotate(
+            prioridad_orden=Case(
+                When(prioridad="critica", then=Value(4)),
+                When(prioridad="alta", then=Value(3)),
+                When(prioridad="media", then=Value(2)),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        ).order_by("-prioridad_orden", "-created_at", "-pk")
+
+
+class Alerta(AsignaGimnasioMixin, ModeloAuditable):
+    """Centro de alertas administrativas."""
+
+    class Tipo(models.TextChoices):
+        MEMBRESIA_POR_VENCER = "membresia_por_vencer", "Membresía por vencer"
+        MEMBRESIA_VENCIDA = "membresia_vencida", "Membresía vencida"
+        CLIENTE_INACTIVO = "cliente_inactivo", "Cliente inactivo"
+        INGRESOS_BAJOS = "ingresos_bajos", "Ingresos bajos"
+        GASTOS_ALTOS = "gastos_altos", "Gastos altos"
+        NUEVO_GASTO = "nuevo_gasto", "Nuevo gasto registrado"
+        PAGOS_PENDIENTES = "pagos_pendientes", "Pagos pendientes"
+        ASISTENCIA_BAJA = "asistencia_baja", "Asistencia baja"
+
+    class Prioridad(models.TextChoices):
+        BAJA = "baja", "Baja"
+        MEDIA = "media", "Media"
+        ALTA = "alta", "Alta"
+        CRITICA = "critica", "Crítica"
+
+    id = models.BigAutoField(primary_key=True)
+    ORIGENES_GIMNASIO = ("cliente.usuario", "membresia", "pago", "gasto")
+    gimnasio = models.ForeignKey(
+        Gimnasio,
+        on_delete=models.PROTECT,
+        related_name="alertas",
+        db_column="gimnasio_id",
+    )
+    tipo = models.CharField(max_length=30, choices=Tipo.choices)
+    prioridad = models.CharField(max_length=10, choices=Prioridad.choices, default=Prioridad.MEDIA)
+    titulo = models.CharField(max_length=200)
+    mensaje = models.TextField()
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.SET_NULL,
+        related_name="alertas",
+        db_column="cliente_id",
+        null=True,
+        blank=True,
+    )
+    membresia = models.ForeignKey(
+        Membresia,
+        on_delete=models.SET_NULL,
+        related_name="alertas",
+        db_column="membresia_id",
+        null=True,
+        blank=True,
+    )
+    pago = models.ForeignKey(
+        Pago,
+        on_delete=models.SET_NULL,
+        related_name="alertas",
+        db_column="pago_id",
+        null=True,
+        blank=True,
+    )
+    gasto = models.ForeignKey(
+        Gasto,
+        on_delete=models.SET_NULL,
+        related_name="alertas",
+        db_column="gasto_id",
+        null=True,
+        blank=True,
+    )
+    leida = models.BooleanField(default=False)
+    leida_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        related_name="alertas_leidas",
+        db_column="leida_por_id",
+        null=True,
+        blank=True,
+    )
+    leida_at = models.DateTimeField(null=True, blank=True)
+    datos_adicionales = models.JSONField(default=dict, blank=True)
+
+    objects = AlertaQuerySet.as_manager()
+
+    class Meta:
+        db_table = "alertas"
+        indexes = [
+            models.Index(fields=["gimnasio", "leida"], name="idx_alerta_gimnasio"),
+            models.Index(fields=["tipo", "leida"], name="idx_alerta_tipo_leida"),
+            models.Index(fields=["prioridad", "created_at"], name="idx_alerta_prioridad_fecha"),
+            models.Index(fields=["cliente", "leida"], name="idx_alerta_cliente_leida"),
+            models.Index(fields=["created_at"], name="idx_alerta_fecha"),
+        ]
+        ordering = ["-created_at", "-pk"]
+
+    def clean(self):
+        super().clean()
+        self.titulo = (self.titulo or "").strip()
+        self.mensaje = (self.mensaje or "").strip()
+
+    def save(self, *args, **kwargs):
+        self._gimnasio_antes_de_guardar()
+        self.titulo = (self.titulo or "").strip()
+        self.mensaje = (self.mensaje or "").strip()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def generar_de_membresias(cls, gimnasio_id=None):
+        """Crea las alertas de membresías por vencer y vencidas que falten.
+
+        Es idempotente: cada membresía recibe una sola alerta por tipo y por
+        fecha de fin, de modo que una renovación vuelve a avisar más adelante.
+        Devuelve cuántas alertas creó.
+        """
+        tipo_por_estado = {
+            Membresia.Estado.POR_VENCER: cls.Tipo.MEMBRESIA_POR_VENCER,
+            Membresia.Estado.VENCIDA: cls.Tipo.MEMBRESIA_VENCIDA,
+        }
+        del_gimnasio = {"gimnasio_id": gimnasio_id} if gimnasio_id else {}
+        existentes = {
+            (membresia_id, tipo, (datos or {}).get("fecha_fin"))
+            for membresia_id, tipo, datos in cls.objects.filter(
+                tipo__in=tipo_por_estado.values(), membresia__isnull=False, **del_gimnasio
+            ).values_list("membresia_id", "tipo", "datos_adicionales")
+        }
+        membresias = Membresia.objects.filter(
+            estado__in=tipo_por_estado.keys(),
+            deleted_at__isnull=True,
+            cliente__deleted_at__isnull=True,
+            cliente__is_active=True,
+            **del_gimnasio,
+        ).select_related("cliente__usuario")
+        nuevas = []
+        for membresia in membresias:
+            tipo = tipo_por_estado[membresia.estado]
+            fecha_fin = membresia.fecha_fin.isoformat()
+            if (membresia.pk, tipo, fecha_fin) in existentes:
+                continue
+            nombre = membresia.cliente.usuario.nombre
+            vencida = tipo == cls.Tipo.MEMBRESIA_VENCIDA
+            nuevas.append(
+                cls(
+                    tipo=tipo,
+                    prioridad=cls.Prioridad.ALTA if vencida else cls.Prioridad.MEDIA,
+                    titulo=(
+                        f"Membresía vencida: {nombre}"
+                        if vencida
+                        else f"Membresía por vencer: {nombre}"
+                    )[:200],
+                    mensaje=(
+                        f"La membresía \"{membresia.nombre}\" de {nombre} "
+                        + ("venció" if vencida else "vence")
+                        + f" el {membresia.fecha_fin:%d/%m/%Y}."
+                    ),
+                    gimnasio_id=membresia.gimnasio_id,
+                    cliente=membresia.cliente,
+                    membresia=membresia,
+                    datos_adicionales={"fecha_fin": fecha_fin},
+                )
+            )
+        cls.objects.bulk_create(nuevas)
+        return len(nuevas)
+
+    def marcar_como_leida(self, usuario):
+        """Marca la alerta como leída por un usuario."""
+        if not self.leida:
+            self.leida = True
+            self.leida_por = usuario if isinstance(usuario, Usuario) else None
+            self.leida_at = timezone.now()
+            self.save(update_fields=["leida", "leida_por", "leida_at", "updated_at"])
+
+    def __str__(self):
+        return f"[{self.get_prioridad_display()}] {self.titulo}"

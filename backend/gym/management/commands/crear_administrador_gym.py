@@ -5,6 +5,7 @@ from getpass import getpass
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from gym.management.gimnasios import resolver_gimnasio
 from gym.models import Administrador, Rol, Usuario, UsuarioRol
 
 
@@ -16,8 +17,13 @@ class Command(BaseCommand):
         parser.add_argument("--correo", required=True, help="Correo para iniciar sesión.")
         parser.add_argument("--username", help="Nombre de usuario opcional.")
         parser.add_argument("--contrasena", help="Contraseña. Si se omite, se solicitará de forma oculta.")
+        parser.add_argument(
+            "--gimnasio",
+            help="Código del gimnasio. Opcional si la plataforma tiene uno solo.",
+        )
 
     def handle(self, *args, **options):
+        gimnasio = resolver_gimnasio(options.get("gimnasio"))
         contrasena = options["contrasena"]
         if not contrasena:
             contrasena = getpass("Contraseña: ")
@@ -39,6 +45,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             usuario = Usuario(
+                gimnasio=gimnasio,
                 rol=rol,
                 nombre=options["nombre"],
                 correo=options["correo"],
@@ -53,4 +60,6 @@ class Command(BaseCommand):
                 nivel_permisos=Administrador.NivelPermisos.TOTAL,
             )
 
-        self.stdout.write(self.style.SUCCESS(f"Administrador creado para {usuario.correo}."))
+        self.stdout.write(
+            self.style.SUCCESS(f"Administrador creado para {usuario.correo} en {gimnasio.nombre}.")
+        )
