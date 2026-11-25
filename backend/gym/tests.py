@@ -289,6 +289,19 @@ class GymApiTests(APITestCase):
                     2,
                 )
 
+    def test_sembrar_datos_demo_no_usa_la_contrasena_publica_fuera_de_debug(self):
+        contrasena_publica = "DemoGym2026!"
+        with self.settings(DEBUG=False):
+            call_command("sembrar_datos_demo", cantidad=5, verbosity=0)
+        demo = Usuario.objects.filter(correo__startswith="demo.usuario").first()
+        self.assertFalse(demo.check_password(contrasena_publica))
+
+    def test_sembrar_datos_demo_usa_la_contrasena_documentada_en_debug(self):
+        with self.settings(DEBUG=True):
+            call_command("sembrar_datos_demo", cantidad=5, verbosity=0)
+        demo = Usuario.objects.filter(correo__startswith="demo.usuario").first()
+        self.assertTrue(demo.check_password("DemoGym2026!"))
+
     def test_alta_usuario_crea_perfil_y_no_expone_hash(self):
         respuesta = self.crear_cliente()
         self.assertNotIn("contrasena", respuesta.data)

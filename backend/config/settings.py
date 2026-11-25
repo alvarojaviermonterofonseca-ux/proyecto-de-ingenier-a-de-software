@@ -129,7 +129,7 @@ else:
         raise ImproperlyConfigured(
             "DB_NAME no está definido. Copia backend/.env.example a backend/.env y "
             "define DB_NAME con la ruta del archivo SQLite, por ejemplo "
-            r"C:\Users\Acer\Downloads\gym_control_pro\base de datos\db.sqlite3"
+            r"C:\ruta\al\proyecto\base de datos\db.sqlite3"
         )
     DATABASES = {
         "default": {
