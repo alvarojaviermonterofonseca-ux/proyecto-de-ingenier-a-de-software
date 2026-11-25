@@ -1,6 +1,6 @@
 <app-page-header
   title="Nombres de recursos"
-  subtitle="Edita el nombre de visualización de cada recurso del sistema. Los cambios se guardan solo en tu sesión del navegador (no se modifica la base de datos)."
+  subtitle="Nombre de visualización de cada recurso del sistema. Se guarda en el servidor y lo ven todos los usuarios."
 />
 
 <div class="toolbar">
@@ -26,6 +26,9 @@
 
 @if (error()) {
   <div class="alert alert-error">{{ error() }}</div>
+}
+@if (formError()) {
+  <div class="alert alert-error">{{ formError() }}</div>
 }
 
 @if (loading()) {
@@ -58,6 +61,8 @@
                   type="text"
                   [(ngModel)]="r.alias"
                   [placeholder]="r.recurso"
+                  [attr.maxlength]="aliasMax"
+                  [disabled]="saving()"
                   class="alias-input"
                   (blur)="guardarAliasRecurso(r.recurso)"
                   (keydown.enter)="guardarAliasRecurso(r.recurso)"
@@ -65,7 +70,7 @@
                 />
                 <button
                   class="btn btn-sm btn-success"
-                  [disabled]="!r.alias.trim() || form.invalid || saving()"
+                  [disabled]="!r.alias.trim() || saving()"
                   (click)="guardarAliasRecurso(r.recurso)"
                   title="Guardar alias"
                 >
@@ -73,7 +78,7 @@
                 </button>
                 <button
                   class="btn btn-sm btn-danger"
-                  [disabled]="!r.alias.trim() || saving()"
+                  [disabled]="!guardados()[r.recurso] || saving()"
                   (click)="eliminarAlias(r.recurso)"
                   title="Eliminar alias"
                 >
@@ -110,8 +115,9 @@
         <strong>Nombre de visualización</strong> y presiona
         <kbd>Enter</kbd> o haz clic en
         <app-icon name="save" style="vertical-align: middle;"></app-icon>
-        para guardarlo. El alias se conserva solo en tu sesión actual del
-        navegador.
+        para guardarlo. Los nombres se guardan en el servidor y son comunes a
+        todos los gimnasios, por eso solo el personal de la plataforma puede
+        cambiarlos; si no lo eres, el servidor rechazará el cambio.
       </p>
       <p>
         Al hacer clic en <strong>Ver</strong>, se abre la página del recurso

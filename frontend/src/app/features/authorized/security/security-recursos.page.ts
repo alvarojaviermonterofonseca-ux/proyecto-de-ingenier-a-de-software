@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { ApiClient } from '../../../core/api/api-client.service';
 import { ApiError } from '../../../core/api/api-error';
-import type { Permission } from '../../../core/api/api.models';
+import type { Permission, ResourceAlias } from '../../../core/api/api.models';
 import { AuthService } from '../../../core/auth/auth.service';
 import { ConfirmService } from '../../../core/ui/confirm.service';
 import { ToastService } from '../../../core/ui/toast.service';
@@ -12,7 +12,7 @@ import { EmptyStateComponent } from '../../../shared/empty-state.component';
 import { IconComponent } from '../../../shared/icon.component';
 import { PageHeaderComponent } from '../../../shared/page-header.component';
 
-const STORAGE_KEY = 'gym_recursos_alias';
+const ALIAS_MAX = 60;
 
 interface RecursoAlias {
   recurso: string;
@@ -47,7 +47,6 @@ const RECURSO_RUTA: Record<string, string> = {
   selector: 'app-security-recursos',
   standalone: true,
   imports: [
-    ReactiveFormsModule,
     FormsModule,
     EmptyStateComponent,
     IconComponent,
@@ -62,7 +61,6 @@ export class SecurityRecursosPage {
   private readonly router = inject(Router);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
-  private readonly formBuilder = inject(FormBuilder);
   protected readonly auth = inject(AuthService);
 
   protected readonly canEdit = computed(() =>
@@ -70,15 +68,14 @@ export class SecurityRecursosPage {
   );
 
   protected readonly recursos = signal<RecursoAlias[]>([]);
+  /** Alias tal como están guardados en el servidor (recurso -> nombre). */
+  protected readonly guardados = signal<Record<string, string>>({});
   protected readonly loading = signal(true);
   protected readonly error = signal<string | null>(null);
   protected readonly saving = signal(false);
   protected readonly formError = signal<string | null>(null);
   protected readonly query = signal('');
-
-  protected readonly form = this.formBuilder.nonNullable.group({
-    alias: ['', [Validators.required, Validators.maxLength(60)]],
-  });
+  protected readonly aliasMax = ALIAS_MAX;
 
   protected readonly visible = computed(() => {
     const q = this.query().trim().toLowerCase();
@@ -93,7 +90,6 @@ export class SecurityRecursosPage {
 
   ngOnInit(): void {
     this.load();
-    this.cargarAliasGuardados();
   }
 
   protected load(): void {
@@ -111,6 +107,8 @@ export class SecurityRecursosPage {
           }
         }
         this.recursos.set(lista);
+        // Los alias se aplican cuando ya existe la lista de recursos.
+        this.cargarAliasGuardados();
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -124,29 +122,26 @@ export class SecurityRecursosPage {
     });
   }
 
+  /** Lee los alias del servidor: son comunes a todos los usuarios. */
   private cargarAliasGuardados(): void {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const guardados: Record<string, string> = JSON.parse(raw);
-      this.recursos.update((lista) =>
-        lista.map((r) => ({ ...r, alias: guardados[r.recurso] ?? r.alias })),
-      );
-    } catch {
-      // Ignorar errores de parseo; se empieza con alias vacíos
-    }
-  }
-
-  private guardarAlias(): void {
-    const guardados: Record<string, string> = {};
-    for (const r of this.recursos()) {
-      if (r.alias.trim()) guardados[r.recurso] = r.alias.trim();
-    }
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(guardados));
-    } catch {
-      // sessionStorage puede no estar disponible en algunos entornos
-    }
+    this.api.get<ResourceAlias[]>('resource-aliases/').subscribe({
+      next: (filas) => {
+        const guardados: Record<string, string> = {};
+        for (const fila of filas) {
+          if (fila.tiene_alias) guardados[fila.nombre_original] = fila.nombre_actual;
+        }
+        this.guardados.set(guardados);
+        this.recursos.update((lista) =>
+          lista.map((r) => ({ ...r, alias: guardados[r.recurso] ?? '' })),
+        );
+      },
+      error: (error: unknown) => {
+        this.toast.error(
+          'No se pudieron cargar los nombres guardados',
+          error instanceof ApiError ? error.message : undefined,
+        );
+      },
+    });
   }
 
   protected updateQuery(value: string): void {
@@ -155,25 +150,62 @@ export class SecurityRecursosPage {
 
   protected guardarAliasRecurso(recurso: string): void {
     this.formError.set(null);
-    if (this.form.invalid) {
-      this.form.markAllAsTouched();
+    const fila = this.recursos().find((r) => r.recurso === recurso);
+    if (!fila || this.saving()) return;
+    const nuevoAlias = fila.alias.trim();
+    if (nuevoAlias.length > ALIAS_MAX) {
+      this.formError.set(`El nombre no puede superar ${ALIAS_MAX} caracteres.`);
       return;
     }
-    const raw = this.form.getRawValue();
-    const nuevoAlias = raw.alias.trim();
-
-    this.recursos.update((lista) =>
-      lista.map((r) =>
-        r.recurso === recurso ? { ...r, alias: nuevoAlias } : r,
-      ),
-    );
-    this.guardarAlias();
-    this.toast.success('Alias guardado', `Nombre de visualización actualizado para ${recurso}.`);
+    // El blur también llama aquí: no se envía nada si no cambió.
+    if (nuevoAlias === (this.guardados()[recurso] ?? '')) return;
+    this.enviarAlias(recurso, nuevoAlias, nuevoAlias ? 'Alias guardado' : 'Alias eliminado');
   }
 
   protected cancelarEdicion(recurso: string): void {
-    this.cargarAliasGuardados();
+    this.restaurar(recurso);
     this.formError.set(null);
+  }
+
+  /** Guarda el alias en el servidor; un texto vacío lo elimina. */
+  private enviarAlias(recurso: string, alias: string, titulo: string): void {
+    this.saving.set(true);
+    this.api
+      .put<ResourceAlias>(`resource-aliases/${encodeURIComponent(recurso)}/`, {
+        nombre_actual: alias,
+      })
+      .subscribe({
+        next: (respuesta) => {
+          this.saving.set(false);
+          const valor = respuesta.tiene_alias ? respuesta.nombre_actual : '';
+          this.guardados.update((actuales) => {
+            const copia = { ...actuales };
+            if (valor) copia[recurso] = valor;
+            else delete copia[recurso];
+            return copia;
+          });
+          this.recursos.update((lista) =>
+            lista.map((r) => (r.recurso === recurso ? { ...r, alias: valor } : r)),
+          );
+          this.toast.success(titulo, `Nombre de visualización actualizado para ${recurso}.`);
+        },
+        error: (error: unknown) => {
+          this.saving.set(false);
+          this.restaurar(recurso);
+          this.toast.error(
+            'No se pudo guardar el nombre',
+            error instanceof ApiError ? error.message : undefined,
+          );
+        },
+      });
+  }
+
+  /** Devuelve la fila al valor guardado en el servidor. */
+  private restaurar(recurso: string): void {
+    const valor = this.guardados()[recurso] ?? '';
+    this.recursos.update((lista) =>
+      lista.map((r) => (r.recurso === recurso ? { ...r, alias: valor } : r)),
+    );
   }
 
   protected async eliminarAlias(recurso: string): Promise<void> {
@@ -184,12 +216,7 @@ export class SecurityRecursosPage {
       tone: 'danger',
     });
     if (!accepted) return;
-
-    this.recursos.update((lista) =>
-      lista.map((r) => (r.recurso === recurso ? { ...r, alias: '' } : r)),
-    );
-    this.guardarAlias();
-    this.toast.success('Alias eliminado');
+    this.enviarAlias(recurso, '', 'Alias eliminado');
   }
 
   protected aliasPara(recurso: string): string {

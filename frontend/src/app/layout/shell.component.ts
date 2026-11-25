@@ -4,7 +4,7 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { filter, fromEvent } from 'rxjs';
 
 import { ApiClient } from '../core/api/api-client.service';
-import type { ResourceCounts } from '../core/api/api.models';
+import type { ResourceAlias, ResourceCounts } from '../core/api/api.models';
 import { AuthService } from '../core/auth/auth.service';
 import { LoadingService } from '../core/api/loading.service';
 import { ConfirmService } from '../core/ui/confirm.service';
@@ -117,20 +117,22 @@ export class ShellComponent {
       });
   }
 
-  private readonly ALIAS_STORAGE_KEY = 'gym_recursos_alias';
-
+  /** Nombres visibles de los recursos del menú, guardados en el servidor. */
   private loadAliases(): void {
-    try {
-      const raw = sessionStorage.getItem(this.ALIAS_STORAGE_KEY);
-      if (!raw) {
-        this.aliases.set({});
-        return;
-      }
-      const guardados: Record<string, string> = JSON.parse(raw);
-      this.aliases.set(guardados);
-    } catch {
-      this.aliases.set({});
-    }
+    this.api
+      .get<ResourceAlias[]>('resource-aliases/')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (filas) => {
+          const aliases: Record<string, string> = {};
+          for (const fila of filas) {
+            if (fila.tiene_alias) aliases[fila.nombre_original] = fila.nombre_actual;
+          }
+          this.aliases.set(aliases);
+        },
+        // Sin alias el menú muestra los nombres originales.
+        error: () => this.aliases.set({}),
+      });
   }
 
   protected toggleSidebar(): void {
