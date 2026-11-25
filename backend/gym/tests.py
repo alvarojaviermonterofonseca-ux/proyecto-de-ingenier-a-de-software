@@ -2697,6 +2697,19 @@ class FinancieroApiTests(APITestCase):
         self.assertEqual(cambios["vencidas"], 2)
         self.assertEqual(cancelada.estado, Membresia.Estado.CANCELADA)
 
+    def test_listado_de_membresias_muestra_el_estado_al_dia(self):
+        membresia = self._membresia(self.hoy + timedelta(days=20))
+        # Simula el paso del tiempo sin ejecutar actualizar_membresias.
+        Membresia.objects.filter(pk=membresia.pk).update(
+            fecha_fin=self.hoy - timedelta(days=1)
+        )
+
+        detalle = self.client.get(f"/api/v1/membresias/{membresia.pk}/")
+        self.assertEqual(detalle.status_code, 200, detalle.data)
+        self.assertEqual(detalle.data["estado"], Membresia.Estado.VENCIDA)
+        listado = self.client.get("/api/v1/membresias/", {"estado": "activa"})
+        self.assertEqual(listado.data["count"], 0)
+
     def test_comando_actualizar_membresias_sincroniza_estados(self):
         membresia = self._membresia(self.hoy + timedelta(days=20))
         Membresia.objects.filter(pk=membresia.pk).update(
