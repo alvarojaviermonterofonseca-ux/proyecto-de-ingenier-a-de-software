@@ -5,6 +5,7 @@ en un hash; ``contrasena_hash`` nunca forma parte de una respuesta JSON.
 """
 
 import json
+import logging
 from copy import copy
 
 from django.contrib.auth.password_validation import validate_password
@@ -55,6 +56,8 @@ from .models import (
 )
 from .permissions import es_administrador
 from .tenancy import es_plataforma, filtrar_por_gimnasio, gimnasio_id_de
+
+logger = logging.getLogger(__name__)
 
 
 class SerializerVacio(serializers.Serializer):
@@ -1603,7 +1606,13 @@ class EjercicioSerializer(ModeloValidadoSerializer):
         nueva = instance.imagen.name if instance.imagen else None
         if anterior and anterior != nueva:
             # No deja archivos huérfanos al reemplazar o quitar la imagen.
-            instance.imagen.storage.delete(anterior)
+            try:
+                instance.imagen.storage.delete(anterior)
+            except OSError:
+                # En Windows no se puede borrar un archivo que otro proceso
+                # tiene abierto (p. ej. una descarga en curso). El cambio ya
+                # quedó guardado, así que solo se registra el archivo huérfano.
+                logger.warning("No se pudo borrar la imagen anterior %s", anterior, exc_info=True)
         return instance
 
     @extend_schema_field({"type": "string", "format": "uri", "nullable": True})
